@@ -235,6 +235,8 @@ class TaichiFEM3DSimulator:
         self.kinetic_energy = ti.field(dtype=ti.f32, shape=())
         self.elastic_energy = ti.field(dtype=ti.f32, shape=())
         self.mean_j_sum = ti.field(dtype=ti.f32, shape=())
+        self.center_sum = ti.Vector.field(3, dtype=ti.f32, shape=())
+        self.velocity_sum = ti.Vector.field(3, dtype=ti.f32, shape=())
 
         self.constitutive_model = ti.field(dtype=ti.i32, shape=())
         self.constitutive_model[None] = 1 if constitutive_model == "neo_hookean" else 0
@@ -255,6 +257,8 @@ class TaichiFEM3DSimulator:
         self.kinetic_energy[None] = 0.0
         self.elastic_energy[None] = 0.0
         self.mean_j_sum[None] = 0.0
+        self.center_sum[None] = ti.Vector([0.0, 0.0, 0.0])
+        self.velocity_sum[None] = ti.Vector([0.0, 0.0, 0.0])
 
     @ti.kernel
     def reset_frame_stats(self):
@@ -351,6 +355,27 @@ class TaichiFEM3DSimulator:
             self.v[i] = vel
             ti.atomic_add(self.kinetic_energy[None], 0.5 * self.mass[i] * vel.dot(vel))
 
+    @ti.kernel
+    def compute_center_velocity_sums(self):
+        self.center_sum[None] = ti.Vector([0.0, 0.0, 0.0])
+        self.velocity_sum[None] = ti.Vector([0.0, 0.0, 0.0])
+        for i in range(self.n_vertices):
+            for d in ti.static(range(3)):
+                ti.atomic_add(self.center_sum[None][d], self.x[i][d])
+                ti.atomic_add(self.velocity_sum[None][d], self.v[i][d])
+
+    @ti.kernel
+    def lock_transverse_center(self, target_y: ti.f32, target_z: ti.f32, strength: ti.f32):
+        center = self.center_sum[None] / self.n_vertices
+        mean_v = self.velocity_sum[None] / self.n_vertices
+        dy = (center[1] - target_y) * strength
+        dz = (center[2] - target_z) * strength
+        for i in range(self.n_vertices):
+            self.x[i][1] -= dy
+            self.x[i][2] -= dz
+            self.v[i][1] -= mean_v[1] * strength
+            self.v[i][2] -= mean_v[2] * strength
+
     def mean_j(self) -> float:
         return float(self.mean_j_sum[None]) / max(1, self.n_tets)
 
@@ -395,6 +420,9 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     dt = float(config["dt"])
     damping = float(config.get("velocity_damping", 0.0))
     max_velocity = float(config.get("max_velocity_m_s", 0.0))
+    lock_transverse = bool(config.get("lock_transverse_center", True))
+    center_lock_strength = float(config.get("center_lock_strength", 1.0))
+    target_center = np.array(config["object_center_m"], dtype=np.float64)
     gravity = np.array([0.0, float(config.get("gravity_m_s2", 0.0)), 0.0], dtype=np.float64)
     domain_size = float(config["domain_size_m"])
     plate_thickness = float(config["plate_thickness_m"])
@@ -434,6 +462,9 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
                 z1,
                 skin,
             )
+            if lock_transverse:
+                sim.compute_center_velocity_sums()
+                sim.lock_transverse_center(float(target_center[1]), float(target_center[2]), center_lock_strength)
 
         x = sim.x.to_numpy()
         stats = particle_geometry(x)

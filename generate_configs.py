@@ -108,6 +108,8 @@ def make_fem_config(scene: dict, stiff: dict, model: dict) -> dict:
         "velocity_damping": 3.0,
         "max_velocity_m_s": 2.0,
         "max_tet_condition": 120.0,
+        "lock_transverse_center": True,
+        "center_lock_strength": 1.0,
         "gravity_m_s2": 0.0,
         "arch": "cpu",
         "seed": 42,
