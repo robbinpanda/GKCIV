@@ -10,8 +10,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
-def find_metric_files(outputs: Path) -> list[Path]:
-    return sorted(path for path in outputs.glob("*/metrics.csv") if path.is_file())
+def find_metric_files(outputs: Path, contains: str | None = None) -> list[Path]:
+    paths = sorted(path for path in outputs.glob("*/metrics.csv") if path.is_file())
+    if contains:
+        paths = [path for path in paths if contains.lower() in path.parent.name.lower()]
+    return paths
 
 
 def load_metrics(paths: list[Path]) -> pd.DataFrame:
@@ -72,8 +75,8 @@ def write_stability_table(df: pd.DataFrame, out: Path) -> None:
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_analysis(outputs: Path, output_dir: Path | None = None) -> Path:
-    metric_files = find_metric_files(outputs)
+def run_analysis(outputs: Path, output_dir: Path | None = None, contains: str | None = None) -> Path:
+    metric_files = find_metric_files(outputs, contains)
     df = load_metrics(metric_files)
     out_dir = output_dir or outputs / "analysis"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -103,12 +106,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate plots from MPM squeeze metrics.")
     parser.add_argument("--outputs", type=Path, default=Path("outputs"), help="Root outputs directory.")
     parser.add_argument("--out", type=Path, default=None, help="Optional analysis output directory.")
+    parser.add_argument("--contains", type=str, default=None, help="Only include run directories containing this text.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    run_analysis(args.outputs, args.out)
+    run_analysis(args.outputs, args.out, args.contains)
 
 
 if __name__ == "__main__":

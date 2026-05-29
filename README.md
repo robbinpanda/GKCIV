@@ -57,16 +57,22 @@ python -m taichi_squeeze.analysis.compare_curves --outputs outputs
 
 ## 5. Run 3D MPM Experiments
 
-The 3D solver is separate from the 2D solver:
+The 3D solvers are separate from the 2D solver. The six 3D configs share the same plate geometry, material parameters, and squeeze timing so their rebound curves can be compared.
 
 ```powershell
 python -m taichi_squeeze.src.simulate_mpm3d --config taichi_squeeze/configs/sphere_3d_40mm_soft.json
 python -m taichi_squeeze.src.simulate_mpm3d --config taichi_squeeze/configs/box_3d_45x35x35_soft.json
-python -m taichi_squeeze.analysis.compare_curves --outputs outputs
+python -m taichi_squeeze.src.simulate_pbd3d --config taichi_squeeze/configs/sphere_3d_40mm_pbd.json
+python -m taichi_squeeze.src.simulate_pbd3d --config taichi_squeeze/configs/box_3d_45x35x35_pbd.json
+python -m taichi_squeeze.src.simulate_fem3d --config taichi_squeeze/configs/sphere_3d_40mm_fem.json
+python -m taichi_squeeze.src.simulate_fem3d --config taichi_squeeze/configs/box_3d_45x35x35_fem.json
+python -m taichi_squeeze.analysis.compare_curves --outputs outputs --contains 3d --out outputs/analysis_3d
 ```
 
 For a faster 3D smoke test:
 
 ```powershell
 python -m taichi_squeeze.src.simulate_mpm3d --config taichi_squeeze/configs/sphere_3d_40mm_soft.json --frames 10 --no-render
+python -m taichi_squeeze.src.simulate_pbd3d --config taichi_squeeze/configs/sphere_3d_40mm_pbd.json --frames 10 --no-render
+python -m taichi_squeeze.src.simulate_fem3d --config taichi_squeeze/configs/sphere_3d_40mm_fem.json --frames 10 --no-render
 ```
