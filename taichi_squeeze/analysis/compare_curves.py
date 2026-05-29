@@ -7,6 +7,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
@@ -82,10 +83,185 @@ def plot_lines(df: pd.DataFrame, x: str, y: str, out: Path, xlabel: str, ylabel:
     plt.close(fig)
 
 
+def plot_hysteresis(df: pd.DataFrame, out: Path) -> None:
+    """绘制滞回曲线（加载-卸载围成面积）"""
+    fig, ax = plt.subplots(figsize=(9.5, 5.6), dpi=160)
+    plotted = 0
+    for label, group in df.groupby("run_dir"):
+        group = group.sort_values("frame")
+        disp = pd.to_numeric(group["squeeze_disp_m"], errors="coerce").values
+        force = pd.to_numeric(group["plate_force_n"], errors="coerce").values
+        mask = ~np.isnan(disp) & ~np.isnan(force)
+        if not mask.any():
+            continue
+        style = style_for_group(group, label)
+        ax.plot(
+            disp[mask],
+            force[mask],
+            label=style["label"],
+            color=style["color"],
+            linewidth=2.0,
+            alpha=0.85,
+        )
+        plotted += 1
+    ax.set_xlabel("displacement (m)")
+    ax.set_ylabel("plate force (N)")
+    ax.set_title("Hysteresis Loop (Force-Displacement)")
+    ax.grid(True, color="#d6dde3", linewidth=0.8)
+    ax.set_facecolor("#fbfdff")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    if plotted:
+        ax.legend(frameon=False, ncols=min(plotted, 3), loc="best")
+    fig.tight_layout()
+    fig.savefig(out)
+    plt.close(fig)
+
+
+def plot_energy(df: pd.DataFrame, out: Path) -> None:
+    """绘制能量曲线"""
+    fig, ax = plt.subplots(figsize=(9.5, 5.6), dpi=160)
+    plotted = 0
+    for label, group in df.groupby("run_dir"):
+        group = group.sort_values("frame")
+        t = pd.to_numeric(group["t"], errors="coerce").values
+        kinetic = pd.to_numeric(group["kinetic_energy"], errors="coerce").values
+        elastic = pd.to_numeric(group["elastic_energy"], errors="coerce").values
+        total = kinetic + elastic
+        style = style_for_group(group, label)
+        ax.plot(t, total, label=style["label"], color=style["color"], linewidth=2.0, alpha=0.85)
+        plotted += 1
+    ax.set_xlabel("time (s)")
+    ax.set_ylabel("total energy (J)")
+    ax.set_title("Total Energy (Kinetic + Elastic)")
+    ax.grid(True, color="#d6dde3", linewidth=0.8)
+    ax.set_facecolor("#fbfdff")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    if plotted:
+        ax.legend(frameon=False, ncols=min(plotted, 3), loc="best")
+    fig.tight_layout()
+    fig.savefig(out)
+    plt.close(fig)
+
+
+def compute_equivalent_stiffness(displacement: np.ndarray, force: np.ndarray) -> float:
+    """等效刚度 k_eq: F-d 曲线前 20% 段线性拟合斜率"""
+    if len(displacement) < 5 or len(force) < 5:
+        return np.nan
+    n = max(2, int(len(displacement) * 0.2))
+    d = displacement[:n]
+    f = force[:n]
+    if d[-1] - d[0] < 1e-12:
+        return np.nan
+    coeffs = np.polyfit(d, f, 1)
+    return float(coeffs[0])
+
+
+def compute_hysteresis_area(displacement: np.ndarray, force: np.ndarray, compress_time: float, release_time: float, fps: int) -> float:
+    """滞回面积 A_hys: 加载-卸载围成面积"""
+    compress_end = int(compress_time * fps)
+    release_start = compress_end
+    release_end = min(len(displacement), int((compress_time + release_time) * fps))
+    
+    if compress_end < 2 or release_end - release_start < 2:
+        return np.nan
+    
+    d_load = displacement[:compress_end]
+    f_load = force[:compress_end]
+    d_unload = displacement[release_start:release_end]
+    f_unload = force[release_start:release_end]
+    
+    area_load = np.trapezoid(f_load, d_load)
+    area_unload = np.trapezoid(f_unload, d_unload)
+    return float(abs(area_load - area_unload))
+
+
+def compute_recovery_time(height: np.ndarray, time: np.ndarray, release_time: float, fps: int) -> float:
+    """恢复时间 T_95: 释放后高度回到 95% 初始高度的时间"""
+    release_start_idx = int(release_time * fps)
+    if release_start_idx >= len(height):
+        return np.nan
+    
+    initial_height = height[0]
+    target_height = initial_height * 0.95
+    
+    release_height = height[release_start_idx:]
+    release_t = time[release_start_idx:]
+    
+    for i, h in enumerate(release_height):
+        if h >= target_height:
+            return float(release_t[i] - release_time)
+    return np.nan
+
+
+def compute_energy_drift(kinetic: np.ndarray, elastic: np.ndarray) -> float:
+    """能量漂移 ΔE: |(E_kin + E_elastic)_final - initial|"""
+    if len(kinetic) < 2 or len(elastic) < 2:
+        return np.nan
+    initial_energy = kinetic[0] + elastic[0]
+    final_energy = kinetic[-1] + elastic[-1]
+    return float(abs(final_energy - initial_energy))
+
+
+def compute_contact_force_jitter(force: np.ndarray, hold_start: float, hold_end: float, fps: int) -> float:
+    """接触力抖动 σ_F: 保持阶段 plate_force_n 标准差"""
+    start_idx = int(hold_start * fps)
+    end_idx = int(hold_end * fps)
+    if start_idx >= len(force) or end_idx > len(force):
+        return np.nan
+    hold_force = force[start_idx:end_idx]
+    if len(hold_force) < 2:
+        return np.nan
+    return float(np.std(hold_force))
+
+
+def compute_volume_ratio_stats(volume_ratio: np.ndarray) -> tuple[float, float]:
+    """体积保持率统计: 均值和方差"""
+    valid = volume_ratio[~np.isnan(volume_ratio)]
+    if len(valid) < 2:
+        return np.nan, np.nan
+    return float(np.mean(valid)), float(np.var(valid))
+
+
+def compute_advanced_metrics(group: pd.DataFrame) -> dict:
+    """计算单个实验组的高级指标"""
+    displacement = pd.to_numeric(group["squeeze_disp_m"], errors="coerce").values
+    force = pd.to_numeric(group["plate_force_n"], errors="coerce").values
+    height = pd.to_numeric(group["height_m"], errors="coerce").values
+    time_vals = pd.to_numeric(group["t"], errors="coerce").values
+    kinetic = pd.to_numeric(group["kinetic_energy"], errors="coerce").values
+    elastic = pd.to_numeric(group["elastic_energy"], errors="coerce").values
+    volume_ratio = pd.to_numeric(group["volume_ratio"], errors="coerce").values
+    
+    fps = 60
+    compress_time = 1.0
+    hold_time = 0.5
+    release_time = 1.0
+    
+    k_eq = compute_equivalent_stiffness(displacement, force)
+    a_hys = compute_hysteresis_area(displacement, force, compress_time, release_time, fps)
+    t_95 = compute_recovery_time(height, time_vals, compress_time + hold_time, fps)
+    delta_e = compute_energy_drift(kinetic, elastic)
+    sigma_f = compute_contact_force_jitter(force, compress_time, compress_time + hold_time, fps)
+    vol_mean, vol_var = compute_volume_ratio_stats(volume_ratio)
+    
+    return {
+        "k_eq": k_eq,
+        "a_hys": a_hys,
+        "t_95": t_95,
+        "delta_e": delta_e,
+        "sigma_f": sigma_f,
+        "volume_mean": vol_mean,
+        "volume_var": vol_var,
+    }
+
+
 def write_stability_table(df: pd.DataFrame, out: Path) -> None:
     rows = []
     for label, group in df.groupby("run_dir"):
         final = group.iloc[-1]
+        advanced = compute_advanced_metrics(group)
         rows.append(
             {
                 "run": label,
@@ -96,6 +272,13 @@ def write_stability_table(df: pd.DataFrame, out: Path) -> None:
                 "final_residual_strain": final["residual_strain"],
                 "min_volume_ratio": group["volume_ratio"].min(),
                 "max_volume_ratio": group["volume_ratio"].max(),
+                "k_eq": advanced["k_eq"],
+                "a_hys": advanced["a_hys"],
+                "t_95": advanced["t_95"],
+                "delta_e": advanced["delta_e"],
+                "sigma_f": advanced["sigma_f"],
+                "volume_mean": advanced["volume_mean"],
+                "volume_var": advanced["volume_var"],
             }
         )
     table = pd.DataFrame(rows)
@@ -136,6 +319,8 @@ def run_analysis(outputs: Path, output_dir: Path | None = None, contains: str | 
     plot_lines(df, "t", "volume_ratio", out_dir / "volume_ratio_time.png", "time (s)", "volume ratio")
     plot_lines(df, "t", "residual_strain", out_dir / "recovery_error_time.png", "time (s)", "residual strain")
     plot_lines(df, "t", "wall_ms", out_dir / "performance_ms_step.png", "time (s)", "wall time per frame (ms)")
+    plot_hysteresis(df, out_dir / "hysteresis.png")
+    plot_energy(df, out_dir / "energy_time.png")
     write_stability_table(df, out_dir / "stability_table.md")
     df.to_csv(out_dir / "combined_metrics.csv", index=False)
 

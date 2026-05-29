@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial import ConvexHull
 
 from taichi_squeeze.src.metrics import write_metrics_csv
 from taichi_squeeze.src.render3d import render_frame_3d, write_preview_gif
@@ -252,6 +253,15 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
         displacement = x - x0
         kinetic = float(0.5 * np.sum(masses[:, None] * v * v))
         elastic = float(0.5 * density * object_volume(config) * np.mean(np.sum(displacement * displacement, axis=1)))
+        
+        try:
+            hull = ConvexHull(x)
+            current_volume = hull.volume
+            initial_volume = object_volume(config)
+            volume_ratio = current_volume / initial_volume if initial_volume > 0 else np.nan
+        except Exception:
+            volume_ratio = np.nan
+        
         wall_ms = (time.perf_counter() - frame_start) * 1000.0
 
         rows.append(
@@ -269,7 +279,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
                 "plate_force_n": f"{frame_force / max(1, substeps):.8f}",
                 "height_m": f"{stats['height_m']:.8f}",
                 "width_m": f"{stats['width_m']:.8f}",
-                "volume_ratio": "",
+                "volume_ratio": f"{volume_ratio:.8f}" if not np.isnan(volume_ratio) else "",
                 "residual_strain": f"{abs(stats['width_m'] - initial['width_m']) / initial['width_m']:.8f}",
                 "max_penetration_m": f"{plate_penetration(x, left, right, y0, y1, z0, z1):.8f}",
                 "kinetic_energy": f"{kinetic:.8f}",
