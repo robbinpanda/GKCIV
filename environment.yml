@@ -5,6 +5,10 @@ channels:
 dependencies:
   - python=3.11
   - pip
+  - pyvista
+  - trimesh
+  - scikit-image
+  - scipy
   - pip:
       - taichi
       - numpy
