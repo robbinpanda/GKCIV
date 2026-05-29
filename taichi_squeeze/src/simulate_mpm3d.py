@@ -14,6 +14,7 @@ import taichi as ti
 from taichi_squeeze.src.constitutive import corotated_energy_density, corotated_pf_ft, neo_hookean_energy_density, neo_hookean_pf_ft
 from taichi_squeeze.src.metrics import write_metrics_csv
 from taichi_squeeze.src.render3d import render_frame_3d, write_preview_gif
+from taichi_squeeze.src.render_pyvista import render_frame_pyvista, write_preview_gif_pyvista
 
 
 def load_config(path: Path) -> dict:

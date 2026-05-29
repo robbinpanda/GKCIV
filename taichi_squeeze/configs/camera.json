@@ -1,0 +1,7 @@
+{
+    "elev": 30,
+    "azim": 45,
+    "zoom": 1.2,
+    "resolution": [960, 720],
+    "bgcolor": "#f8fafc"
+}
