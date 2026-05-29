@@ -1,6 +1,7 @@
 {
   "scene": "sphere_50mm_soft",
   "solver": "mpm",
+  "constitutive_model": "corotated",
   "shape": "circle",
   "seed": 7,
   "output_dir": "outputs/taichi_mpm_sphere",

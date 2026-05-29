@@ -1,6 +1,7 @@
 {
   "scene": "box_3d_45x35x35_fem",
   "solver": "fem3d",
+  "constitutive_model": "corotated",
   "shape": "box",
   "seed": 29,
   "output_dir": "outputs/taichi_fem3d_box",

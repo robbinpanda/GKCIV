@@ -1,6 +1,7 @@
 {
   "scene": "sphere_3d_40mm_soft_20s",
   "solver": "mpm3d",
+  "constitutive_model": "corotated",
   "shape": "sphere",
   "seed": 23,
   "output_dir": "outputs/taichi_mpm3d_sphere_20s",

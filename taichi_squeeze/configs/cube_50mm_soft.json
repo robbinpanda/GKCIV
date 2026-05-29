@@ -1,6 +1,7 @@
 {
   "scene": "cube_50mm_soft",
   "solver": "mpm",
+  "constitutive_model": "corotated",
   "shape": "rounded_box",
   "seed": 11,
   "output_dir": "outputs/taichi_mpm_cube",

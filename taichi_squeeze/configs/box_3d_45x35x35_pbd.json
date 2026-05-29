@@ -1,6 +1,7 @@
 {
   "scene": "box_3d_45x35x35_pbd",
   "solver": "pbd3d",
+  "constitutive_model": "none",
   "shape": "box",
   "seed": 29,
   "output_dir": "outputs/taichi_pbd3d_box",

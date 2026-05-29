@@ -1,6 +1,7 @@
 {
   "scene": "sphere_3d_40mm_pbd",
   "solver": "pbd3d",
+  "constitutive_model": "none",
   "shape": "sphere",
   "seed": 23,
   "output_dir": "outputs/taichi_pbd3d_sphere",

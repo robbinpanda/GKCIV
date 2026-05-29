@@ -1,6 +1,7 @@
 {
   "scene": "sphere_3d_40mm_fem_20s",
   "solver": "fem3d",
+  "constitutive_model": "corotated",
   "shape": "sphere",
   "seed": 23,
   "output_dir": "outputs/taichi_fem3d_sphere_20s",

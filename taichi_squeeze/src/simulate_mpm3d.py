@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import taichi as ti
 
+from taichi_squeeze.src.constitutive import corotated_energy_density, corotated_pf_ft, neo_hookean_energy_density, neo_hookean_pf_ft
 from taichi_squeeze.src.metrics import write_metrics_csv
 from taichi_squeeze.src.render3d import render_frame_3d, write_preview_gif
 
@@ -190,6 +191,10 @@ class MPM3DSimulator:
         self.kinetic_energy = ti.field(dtype=ti.f32, shape=())
         self.elastic_energy = ti.field(dtype=ti.f32, shape=())
 
+        model = config.get("constitutive_model", "corotated").lower()
+        self.constitutive_model = ti.field(dtype=ti.i32, shape=())
+        self.constitutive_model[None] = 0 if model == "corotated" else 1
+
         self.x.from_numpy(initial_positions.astype(np.float32))
         self.initialize_state()
 
@@ -232,10 +237,14 @@ class MPM3DSimulator:
             U, sig, V = ti.svd(self.F[p])
             J = sig[0, 0] * sig[1, 1] * sig[2, 2]
             self.J[p] = J
-            rotation = U @ V.transpose()
-            stress = 2.0 * self.mu * (self.F[p] - rotation) @ self.F[p].transpose()
-            stress += ti.Matrix.identity(ti.f32, 3) * self.la * J * (J - 1.0)
-            stress = (-self.dt * self.p_vol * 4.0 * self.inv_dx * self.inv_dx) * stress
+
+            pf_ft = ti.Matrix.zero(ti.f32, 3, 3)
+            if self.constitutive_model[None] == 0:
+                pf_ft = corotated_pf_ft(self.F[p], self.mu, self.la)
+            else:
+                pf_ft = neo_hookean_pf_ft(self.F[p], self.mu, self.la)
+
+            stress = (-self.dt * self.p_vol * 4.0 * self.inv_dx * self.inv_dx) * pf_ft
             affine = stress + self.p_mass * self.C[p]
 
             for i, j, k in ti.static(ti.ndrange(3, 3, 3)):
@@ -339,8 +348,12 @@ class MPM3DSimulator:
         self.elastic_energy[None] = 0.0
         for p in self.x:
             ti.atomic_add(self.kinetic_energy[None], 0.5 * self.p_mass * self.v[p].dot(self.v[p]))
-            strain = self.J[p] - 1.0
-            ti.atomic_add(self.elastic_energy[None], 0.5 * (self.la + 2.0 * self.mu) * strain * strain * self.p_vol)
+            w = 0.0
+            if self.constitutive_model[None] == 0:
+                w = corotated_energy_density(self.F[p], self.mu, self.la)
+            else:
+                w = neo_hookean_energy_density(self.F[p], self.mu, self.la)
+            ti.atomic_add(self.elastic_energy[None], w * self.p_vol)
 
 
 def run_simulation(config: dict, config_path: Path, frame_override: int | None, no_render: bool) -> Path:

@@ -1,6 +1,7 @@
 {
   "scene": "box_3d_45x35x35_soft",
   "solver": "mpm3d",
+  "constitutive_model": "corotated",
   "shape": "box",
   "seed": 29,
   "output_dir": "outputs/taichi_mpm3d_box",

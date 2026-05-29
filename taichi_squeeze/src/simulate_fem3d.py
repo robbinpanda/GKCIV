@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
+from taichi_squeeze.src.constitutive import corotated_pk1_and_energy, neo_hookean_pk1_and_energy
 from taichi_squeeze.src.metrics import write_metrics_csv
 from taichi_squeeze.src.render3d import render_frame_3d, write_preview_gif
 
@@ -164,7 +165,7 @@ def prepare_tets(rest_x: np.ndarray, tets: np.ndarray, density: float) -> tuple[
     return np.array(valid_tets, dtype=np.int32), np.array(dm_inv), np.array(volumes), masses
 
 
-def compute_forces(x: np.ndarray, tets: np.ndarray, dm_inv: np.ndarray, volumes: np.ndarray, mu: float, la: float) -> tuple[np.ndarray, float, float]:
+def compute_forces(x: np.ndarray, tets: np.ndarray, dm_inv: np.ndarray, volumes: np.ndarray, mu: float, la: float, constitutive_model: str = "corotated") -> tuple[np.ndarray, float, float]:
     forces = np.zeros_like(x)
     elastic_energy = 0.0
     mean_j = 0.0
@@ -173,18 +174,15 @@ def compute_forces(x: np.ndarray, tets: np.ndarray, dm_inv: np.ndarray, volumes:
         ds = np.column_stack((x1 - x0, x2 - x0, x3 - x0))
         F = ds @ dm_inv[tet_id]
         try:
-            U, _, Vt = np.linalg.svd(F)
-            R = U @ Vt
-            if np.linalg.det(R) < 0.0:
-                U[:, -1] *= -1.0
-                R = U @ Vt
+            if constitutive_model == "neo_hookean":
+                P, w = neo_hookean_pk1_and_energy(F, mu, la)
+            else:
+                P, w = corotated_pk1_and_energy(F, mu, la)
             J = float(np.linalg.det(F))
-            finv_t = np.linalg.inv(F).T
-        except np.linalg.LinAlgError:
-            R = np.eye(3)
+        except (np.linalg.LinAlgError, ValueError):
+            P = np.zeros((3, 3), dtype=np.float64)
+            w = 0.0
             J = 1.0
-            finv_t = np.eye(3)
-        P = 2.0 * mu * (F - R) + la * (J - 1.0) * J * finv_t
         H = -volumes[tet_id] * P @ dm_inv[tet_id].T
         f1, f2, f3 = H[:, 0], H[:, 1], H[:, 2]
         f0 = -f1 - f2 - f3
@@ -192,7 +190,7 @@ def compute_forces(x: np.ndarray, tets: np.ndarray, dm_inv: np.ndarray, volumes:
         forces[tet[1]] += f1
         forces[tet[2]] += f2
         forces[tet[3]] += f3
-        elastic_energy += float(volumes[tet_id] * (mu * np.sum((F - R) ** 2) + 0.5 * la * (J - 1.0) ** 2))
+        elastic_energy += volumes[tet_id] * w
         mean_j += J
     return forces, elastic_energy, mean_j / max(1, len(tets))
 
@@ -260,6 +258,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     poisson = float(config["poisson_ratio"])
     mu = young / (2.0 * (1.0 + poisson))
     la = young * poisson / ((1.0 + poisson) * (1.0 - 2.0 * poisson))
+    constitutive_model = config.get("constitutive_model", "corotated").lower()
 
     fps = int(config["fps"])
     max_frames = int(frame_override if frame_override is not None else config["max_frames"])
@@ -287,7 +286,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
         for substep_id in range(substeps):
             sub_t = t + substep_id * dt
             left, right, left_vel, right_vel, squeeze_disp = plate_motion(config, sub_t)
-            forces, elastic, mean_j = compute_forces(x, tets, dm_inv, volumes, mu, la)
+            forces, elastic, mean_j = compute_forces(x, tets, dm_inv, volumes, mu, la, constitutive_model)
             v += (forces / masses[:, None] + gravity) * dt
             v *= max(0.0, 1.0 - damping * dt)
             x += v * dt
