@@ -60,6 +60,15 @@ def neo_hookean_energy_density(F, mu, la):
 
 
 @ti.func
+def neo_hookean_pk1_ti(F, mu, la):
+    """Neo-Hookean first PK stress for tetrahedral FEM kernels."""
+    J = F.determinant()
+    J = ti.max(J, 0.01)
+    F_inv_T = F.inverse().transpose()
+    return mu * (F - F_inv_T) + la * ti.log(J) * F_inv_T
+
+
+@ti.func
 def corotated_energy_density(F, mu, la):
     """Corotated Linear strain energy density W (per unit volume)."""
     U, sig, V = ti.svd(F)
@@ -74,6 +83,17 @@ def corotated_energy_density(F, mu, la):
         + diff[2, 0] * diff[2, 0] + diff[2, 1] * diff[2, 1] + diff[2, 2] * diff[2, 2]
     )
     return mu * frob_sq + 0.5 * la * (J - 1.0) * (J - 1.0)
+
+
+@ti.func
+def corotated_pk1_ti(F, mu, la):
+    """Corotated first PK stress for tetrahedral FEM kernels."""
+    U, sig, V = ti.svd(F)
+    R = U @ V.transpose()
+    J = sig[0, 0] * sig[1, 1] * sig[2, 2]
+    J = ti.max(J, 0.01)
+    F_inv_T = F.inverse().transpose()
+    return 2.0 * mu * (F - R) + la * (J - 1.0) * J * F_inv_T
 
 
 # =====================================================================

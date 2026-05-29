@@ -1,13 +1,14 @@
-from __future__ import annotations
-
 import argparse
 import json
 import math
+import os
 import shutil
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
+import taichi as ti
 from scipy.spatial import ConvexHull, cKDTree
 
 from taichi_squeeze.src.geometry3d import analytical_volume, object_size, squeeze_diameter, spherical_point_cloud
@@ -18,6 +19,17 @@ from taichi_squeeze.src.render3d import render_frame_auto, write_preview_gif
 def load_config(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def arch_from_name(name: str):
+    arch = name.lower()
+    if arch == "cpu":
+        return ti.cpu
+    if arch == "cuda":
+        return ti.cuda
+    if arch == "vulkan":
+        return ti.vulkan
+    raise ValueError(f"Unsupported Taichi arch: {name}")
 
 
 def object_volume(config: dict) -> float:
@@ -116,43 +128,166 @@ def build_springs(points: np.ndarray, spacing: float) -> tuple[np.ndarray, np.nd
     return np.array(edges, dtype=np.int32), np.array(rest_lengths, dtype=np.float64)
 
 
-def project_plates(
-    points: np.ndarray,
-    left: float,
-    right: float,
-    left_vel: float,
-    right_vel: float,
-    y0: float,
-    y1: float,
-    z0: float,
-    z1: float,
-    skin: float,
-    masses: np.ndarray,
-    dt: float,
-    contact_force: float,
-) -> float:
-    in_plate = (points[:, 1] >= y0) & (points[:, 1] <= y1) & (points[:, 2] >= z0) & (points[:, 2] <= z1)
-    left_limit = left + skin
-    right_limit = right - skin
-    left_mask = in_plate & (points[:, 0] < left_limit)
-    right_mask = in_plate & (points[:, 0] > right_limit)
-    if np.any(left_mask):
-        correction = left_limit - points[left_mask, 0]
-        points[left_mask, 0] = left_limit
-        contact_force += float(np.sum(masses[left_mask] * correction / (dt * dt)))
-    if np.any(right_mask):
-        correction = points[right_mask, 0] - right_limit
-        points[right_mask, 0] = right_limit
-        contact_force += float(np.sum(masses[right_mask] * correction / (dt * dt)))
-    return contact_force
-
-
 def plate_penetration(points: np.ndarray, left: float, right: float, y0: float, y1: float, z0: float, z1: float) -> float:
     in_plate = (points[:, 1] >= y0) & (points[:, 1] <= y1) & (points[:, 2] >= z0) & (points[:, 2] <= z1)
     if not np.any(in_plate):
         return 0.0
     selected = points[in_plate]
     return float(max(np.maximum(0.0, left - selected[:, 0]).max(initial=0.0), np.maximum(0.0, selected[:, 0] - right).max(initial=0.0)))
+
+
+@ti.data_oriented
+class TaichiPBD3DSimulator:
+    def __init__(
+        self,
+        points: np.ndarray,
+        edges: np.ndarray,
+        rest_lengths: np.ndarray,
+        masses: np.ndarray,
+        inv_masses: np.ndarray,
+        degree: np.ndarray,
+        density: float,
+        reference_volume: float,
+        domain_size: float,
+    ):
+        self.n_particles = int(len(points))
+        self.n_edges = int(len(edges))
+        self.density = float(density)
+        self.reference_volume = float(reference_volume)
+        self.domain_size = float(domain_size)
+
+        self.x = ti.Vector.field(3, dtype=ti.f32, shape=self.n_particles)
+        self.rest_x = ti.Vector.field(3, dtype=ti.f32, shape=self.n_particles)
+        self.prev_x = ti.Vector.field(3, dtype=ti.f32, shape=self.n_particles)
+        self.v = ti.Vector.field(3, dtype=ti.f32, shape=self.n_particles)
+        self.delta = ti.Vector.field(3, dtype=ti.f32, shape=self.n_particles)
+        self.mass = ti.field(dtype=ti.f32, shape=self.n_particles)
+        self.inv_mass = ti.field(dtype=ti.f32, shape=self.n_particles)
+        self.degree = ti.field(dtype=ti.f32, shape=self.n_particles)
+        self.edges = ti.Vector.field(2, dtype=ti.i32, shape=self.n_edges)
+        self.rest = ti.field(dtype=ti.f32, shape=self.n_edges)
+        self.contact_force = ti.field(dtype=ti.f32, shape=())
+        self.kinetic_energy = ti.field(dtype=ti.f32, shape=())
+        self.elastic_energy = ti.field(dtype=ti.f32, shape=())
+
+        points32 = points.astype(np.float32)
+        self.x.from_numpy(points32)
+        self.rest_x.from_numpy(points32)
+        self.mass.from_numpy(masses.astype(np.float32))
+        self.inv_mass.from_numpy(inv_masses.astype(np.float32))
+        self.degree.from_numpy(degree.astype(np.float32))
+        self.edges.from_numpy(edges.astype(np.int32))
+        self.rest.from_numpy(rest_lengths.astype(np.float32))
+        self.initialize()
+
+    @ti.kernel
+    def initialize(self):
+        for i in range(self.n_particles):
+            self.prev_x[i] = self.x[i]
+            self.v[i] = ti.Vector([0.0, 0.0, 0.0])
+            self.delta[i] = ti.Vector([0.0, 0.0, 0.0])
+        self.contact_force[None] = 0.0
+        self.kinetic_energy[None] = 0.0
+        self.elastic_energy[None] = 0.0
+
+    @ti.kernel
+    def reset_frame_stats(self):
+        self.contact_force[None] = 0.0
+
+    @ti.kernel
+    def predict(self, dt: ti.f32, damping: ti.f32, gravity_y: ti.f32):
+        damp = ti.max(0.0, 1.0 - damping * dt)
+        for i in range(self.n_particles):
+            self.prev_x[i] = self.x[i]
+            self.v[i] = (self.v[i] + ti.Vector([0.0, gravity_y, 0.0]) * dt) * damp
+            self.x[i] += self.v[i] * dt
+
+    @ti.kernel
+    def project_plates(
+        self,
+        left: ti.f32,
+        right: ti.f32,
+        y0: ti.f32,
+        y1: ti.f32,
+        z0: ti.f32,
+        z1: ti.f32,
+        skin: ti.f32,
+        dt: ti.f32,
+    ):
+        left_limit = left + skin
+        right_limit = right - skin
+        for i in range(self.n_particles):
+            pos = self.x[i]
+            in_plate = pos[1] >= y0 and pos[1] <= y1 and pos[2] >= z0 and pos[2] <= z1
+            if in_plate and pos[0] < left_limit:
+                correction = left_limit - pos[0]
+                pos[0] = left_limit
+                ti.atomic_add(self.contact_force[None], self.mass[i] * correction / (dt * dt))
+            if in_plate and pos[0] > right_limit:
+                correction = pos[0] - right_limit
+                pos[0] = right_limit
+                ti.atomic_add(self.contact_force[None], self.mass[i] * correction / (dt * dt))
+            self.x[i] = pos
+
+    @ti.kernel
+    def solve_springs_once(self, stiffness: ti.f32):
+        for i in range(self.n_particles):
+            self.delta[i] = ti.Vector([0.0, 0.0, 0.0])
+
+        for e in range(self.n_edges):
+            a = self.edges[e][0]
+            b = self.edges[e][1]
+            diff = self.x[b] - self.x[a]
+            dist = diff.norm()
+            if dist > 1e-12:
+                correction_mag = stiffness * (dist - self.rest[e]) / (self.inv_mass[a] + self.inv_mass[b])
+                correction = correction_mag / dist * diff
+                wa = self.inv_mass[a] / self.degree[a]
+                wb = self.inv_mass[b] / self.degree[b]
+                for d in ti.static(range(3)):
+                    ti.atomic_add(self.delta[a][d], wa * correction[d])
+                    ti.atomic_add(self.delta[b][d], -wb * correction[d])
+
+        for i in range(self.n_particles):
+            self.x[i] += self.delta[i]
+
+    @ti.kernel
+    def finalize_velocity(
+        self,
+        dt: ti.f32,
+        left: ti.f32,
+        right: ti.f32,
+        left_vel: ti.f32,
+        right_vel: ti.f32,
+        y0: ti.f32,
+        y1: ti.f32,
+        z0: ti.f32,
+        z1: ti.f32,
+        skin: ti.f32,
+    ):
+        self.kinetic_energy[None] = 0.0
+        self.elastic_energy[None] = 0.0
+        eps = 0.002
+        left_limit = left + skin
+        right_limit = right - skin
+        for i in range(self.n_particles):
+            pos = self.x[i]
+            pos[0] = ti.min(ti.max(pos[0], eps), self.domain_size - eps)
+            pos[1] = ti.min(ti.max(pos[1], eps), self.domain_size - eps)
+            pos[2] = ti.min(ti.max(pos[2], eps), self.domain_size - eps)
+
+            vel = (pos - self.prev_x[i]) / dt
+            in_plate = pos[1] >= y0 and pos[1] <= y1 and pos[2] >= z0 and pos[2] <= z1
+            if in_plate and pos[0] <= left_limit + 1e-9:
+                vel[0] = ti.max(vel[0], left_vel)
+            if in_plate and pos[0] >= right_limit - 1e-9:
+                vel[0] = ti.min(vel[0], right_vel)
+
+            self.x[i] = pos
+            self.v[i] = vel
+            disp = pos - self.rest_x[i]
+            ti.atomic_add(self.kinetic_energy[None], 0.5 * self.mass[i] * vel.dot(vel))
+            ti.atomic_add(self.elastic_energy[None], 0.5 * self.density * self.reference_volume * disp.dot(disp) / self.n_particles)
 
 
 def run_simulation(config: dict, config_path: Path, frame_override: int | None, no_render: bool) -> Path:
@@ -166,10 +301,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
 
     x, spacing = build_lattice(config)
     edges, rest = build_springs(x, spacing)
-    edge_a = edges[:, 0]
-    edge_b = edges[:, 1]
     degree = np.maximum(np.bincount(edges.reshape(-1), minlength=len(x)), 1).astype(np.float64)
-    v = np.zeros_like(x)
     x0 = x.copy()
     initial = particle_geometry(x)
     try:
@@ -181,6 +313,24 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     total_mass = density * object_volume(config)
     masses = np.full(len(x), total_mass / len(x), dtype=np.float64)
     inv_masses = 1.0 / masses
+
+    ti.init(
+        arch=arch_from_name(config.get("arch", "cpu")),
+        default_fp=ti.f32,
+        random_seed=int(config.get("seed", 0)),
+        offline_cache=False,
+    )
+    sim = TaichiPBD3DSimulator(
+        x,
+        edges,
+        rest,
+        masses,
+        inv_masses,
+        degree,
+        density,
+        object_volume(config),
+        float(config["domain_size_m"]),
+    )
 
     fps = int(config["fps"])
     max_frames = int(frame_override if frame_override is not None else config["max_frames"])
@@ -206,38 +356,23 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
         frame_force = 0.0
         t = frame / fps
         left, right, left_vel, right_vel, squeeze_disp = plate_motion(config, t)
+        sim.reset_frame_stats()
 
         for substep_id in range(substeps):
             sub_t = t + substep_id * dt
             left, right, left_vel, right_vel, squeeze_disp = plate_motion(config, sub_t)
-            prev_x = x.copy()
-            v += gravity * dt
-            v *= max(0.0, 1.0 - damping * dt)
-            x += v * dt
-
-            frame_force = project_plates(x, left, right, left_vel, right_vel, y0, y1, z0, z1, skin, masses, dt, frame_force)
+            sim.predict(dt, damping, float(gravity[1]))
+            sim.project_plates(left, right, y0, y1, z0, z1, skin, dt)
             for _ in range(iterations):
-                delta = x[edge_b] - x[edge_a]
-                dist = np.linalg.norm(delta, axis=1)
-                safe_dist = np.maximum(dist, 1e-12)
-                correction_mag = stiffness * (dist - rest) / (inv_masses[edge_a] + inv_masses[edge_b])
-                correction = (correction_mag / safe_dist)[:, None] * delta
-                np.add.at(x, edge_a, (inv_masses[edge_a] / degree[edge_a])[:, None] * correction)
-                np.add.at(x, edge_b, -(inv_masses[edge_b] / degree[edge_b])[:, None] * correction)
-                frame_force = project_plates(x, left, right, left_vel, right_vel, y0, y1, z0, z1, skin, masses, dt, frame_force)
+                sim.solve_springs_once(stiffness)
+                sim.project_plates(left, right, y0, y1, z0, z1, skin, dt)
+            sim.finalize_velocity(dt, left, right, left_vel, right_vel, y0, y1, z0, z1, skin)
 
-            eps = 0.002
-            x[:] = np.clip(x, eps, domain_size - eps)
-            v = (x - prev_x) / dt
-            in_left = (x[:, 0] <= left + skin + 1e-9) & (x[:, 1] >= y0) & (x[:, 1] <= y1) & (x[:, 2] >= z0) & (x[:, 2] <= z1)
-            in_right = (x[:, 0] >= right - skin - 1e-9) & (x[:, 1] >= y0) & (x[:, 1] <= y1) & (x[:, 2] >= z0) & (x[:, 2] <= z1)
-            v[in_left, 0] = np.maximum(v[in_left, 0], left_vel)
-            v[in_right, 0] = np.minimum(v[in_right, 0], right_vel)
-
+        x = sim.x.to_numpy()
         stats = particle_geometry(x)
-        displacement = x - x0
-        kinetic = float(0.5 * np.sum(masses[:, None] * v * v))
-        elastic = float(0.5 * density * object_volume(config) * np.mean(np.sum(displacement * displacement, axis=1)))
+        frame_force = float(sim.contact_force[None])
+        kinetic = float(sim.kinetic_energy[None])
+        elastic = float(sim.elastic_energy[None])
         
         try:
             hull = ConvexHull(x)

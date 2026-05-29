@@ -1,15 +1,21 @@
-from __future__ import annotations
-
 import argparse
 import json
+import os
 import shutil
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
+import taichi as ti
 from scipy.spatial import Delaunay
 
-from taichi_squeeze.src.constitutive import corotated_pk1_and_energy, neo_hookean_pk1_and_energy
+from taichi_squeeze.src.constitutive import (
+    corotated_energy_density,
+    corotated_pk1_ti,
+    neo_hookean_energy_density,
+    neo_hookean_pk1_ti,
+)
 from taichi_squeeze.src.geometry3d import object_size, squeeze_diameter, spherical_point_cloud
 from taichi_squeeze.src.metrics import write_metrics_csv
 from taichi_squeeze.src.render3d import render_frame_auto, write_preview_gif
@@ -18,6 +24,17 @@ from taichi_squeeze.src.render3d import render_frame_auto, write_preview_gif
 def load_config(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def arch_from_name(name: str):
+    arch = name.lower()
+    if arch == "cpu":
+        return ti.cpu
+    if arch == "cuda":
+        return ti.cuda
+    if arch == "vulkan":
+        return ti.vulkan
+    raise ValueError(f"Unsupported Taichi arch: {name}")
 
 
 def plate_motion(config: dict, t: float) -> tuple[float, float, float, float, float]:
@@ -179,85 +196,163 @@ def prepare_tets(rest_x: np.ndarray, tets: np.ndarray, density: float, max_condi
     return np.array(valid_tets, dtype=np.int32), np.array(dm_inv), np.array(volumes), masses
 
 
-def clip_velocity(v: np.ndarray, max_velocity: float) -> None:
-    if max_velocity <= 0.0:
-        return
-    speed = np.linalg.norm(v, axis=1)
-    mask = speed > max_velocity
-    if np.any(mask):
-        v[mask] *= (max_velocity / speed[mask])[:, None]
-
-
-def compute_forces(x: np.ndarray, tets: np.ndarray, dm_inv: np.ndarray, volumes: np.ndarray, mu: float, la: float, constitutive_model: str = "corotated") -> tuple[np.ndarray, float, float]:
-    forces = np.zeros_like(x)
-    elastic_energy = 0.0
-    mean_j = 0.0
-    for tet_id, tet in enumerate(tets):
-        x0, x1, x2, x3 = x[tet]
-        ds = np.column_stack((x1 - x0, x2 - x0, x3 - x0))
-        F = ds @ dm_inv[tet_id]
-        try:
-            if constitutive_model == "neo_hookean":
-                P, w = neo_hookean_pk1_and_energy(F, mu, la)
-            else:
-                P, w = corotated_pk1_and_energy(F, mu, la)
-            J = float(np.linalg.det(F))
-        except (np.linalg.LinAlgError, ValueError):
-            P = np.zeros((3, 3), dtype=np.float64)
-            w = 0.0
-            J = 1.0
-        H = -volumes[tet_id] * P @ dm_inv[tet_id].T
-        f1, f2, f3 = H[:, 0], H[:, 1], H[:, 2]
-        f0 = -f1 - f2 - f3
-        forces[tet[0]] += f0
-        forces[tet[1]] += f1
-        forces[tet[2]] += f2
-        forces[tet[3]] += f3
-        elastic_energy += volumes[tet_id] * w
-        mean_j += J
-    return forces, elastic_energy, mean_j / max(1, len(tets))
-
-
-def project_plates(
-    points: np.ndarray,
-    velocities: np.ndarray,
-    masses: np.ndarray,
-    left: float,
-    right: float,
-    left_vel: float,
-    right_vel: float,
-    y0: float,
-    y1: float,
-    z0: float,
-    z1: float,
-    skin: float,
-    dt: float,
-) -> float:
-    contact_force = 0.0
-    in_plate = (points[:, 1] >= y0) & (points[:, 1] <= y1) & (points[:, 2] >= z0) & (points[:, 2] <= z1)
-    left_limit = left + skin
-    right_limit = right - skin
-    left_mask = in_plate & (points[:, 0] < left_limit)
-    right_mask = in_plate & (points[:, 0] > right_limit)
-    if np.any(left_mask):
-        correction = left_limit - points[left_mask, 0]
-        points[left_mask, 0] = left_limit
-        velocities[left_mask, 0] = np.maximum(velocities[left_mask, 0], left_vel)
-        contact_force += float(np.sum(masses[left_mask] * correction / (dt * dt)))
-    if np.any(right_mask):
-        correction = points[right_mask, 0] - right_limit
-        points[right_mask, 0] = right_limit
-        velocities[right_mask, 0] = np.minimum(velocities[right_mask, 0], right_vel)
-        contact_force += float(np.sum(masses[right_mask] * correction / (dt * dt)))
-    return contact_force
-
-
 def plate_penetration(points: np.ndarray, left: float, right: float, y0: float, y1: float, z0: float, z1: float) -> float:
     in_plate = (points[:, 1] >= y0) & (points[:, 1] <= y1) & (points[:, 2] >= z0) & (points[:, 2] <= z1)
     if not np.any(in_plate):
         return 0.0
     selected = points[in_plate]
     return float(max(np.maximum(0.0, left - selected[:, 0]).max(initial=0.0), np.maximum(0.0, selected[:, 0] - right).max(initial=0.0)))
+
+
+@ti.data_oriented
+class TaichiFEM3DSimulator:
+    def __init__(
+        self,
+        rest_x: np.ndarray,
+        tets: np.ndarray,
+        dm_inv: np.ndarray,
+        volumes: np.ndarray,
+        masses: np.ndarray,
+        mu: float,
+        la: float,
+        constitutive_model: str,
+        domain_size: float,
+    ):
+        self.n_vertices = int(len(rest_x))
+        self.n_tets = int(len(tets))
+        self.mu = float(mu)
+        self.la = float(la)
+        self.domain_size = float(domain_size)
+
+        self.x = ti.Vector.field(3, dtype=ti.f32, shape=self.n_vertices)
+        self.v = ti.Vector.field(3, dtype=ti.f32, shape=self.n_vertices)
+        self.force = ti.Vector.field(3, dtype=ti.f32, shape=self.n_vertices)
+        self.mass = ti.field(dtype=ti.f32, shape=self.n_vertices)
+        self.tets = ti.Vector.field(4, dtype=ti.i32, shape=self.n_tets)
+        self.dm_inv = ti.Matrix.field(3, 3, dtype=ti.f32, shape=self.n_tets)
+        self.volume = ti.field(dtype=ti.f32, shape=self.n_tets)
+        self.contact_force = ti.field(dtype=ti.f32, shape=())
+        self.kinetic_energy = ti.field(dtype=ti.f32, shape=())
+        self.elastic_energy = ti.field(dtype=ti.f32, shape=())
+        self.mean_j_sum = ti.field(dtype=ti.f32, shape=())
+
+        self.constitutive_model = ti.field(dtype=ti.i32, shape=())
+        self.constitutive_model[None] = 1 if constitutive_model == "neo_hookean" else 0
+
+        self.x.from_numpy(rest_x.astype(np.float32))
+        self.mass.from_numpy(masses.astype(np.float32))
+        self.tets.from_numpy(tets.astype(np.int32))
+        self.dm_inv.from_numpy(dm_inv.astype(np.float32))
+        self.volume.from_numpy(volumes.astype(np.float32))
+        self.initialize()
+
+    @ti.kernel
+    def initialize(self):
+        for i in range(self.n_vertices):
+            self.v[i] = ti.Vector([0.0, 0.0, 0.0])
+            self.force[i] = ti.Vector([0.0, 0.0, 0.0])
+        self.contact_force[None] = 0.0
+        self.kinetic_energy[None] = 0.0
+        self.elastic_energy[None] = 0.0
+        self.mean_j_sum[None] = 0.0
+
+    @ti.kernel
+    def reset_frame_stats(self):
+        self.contact_force[None] = 0.0
+
+    @ti.kernel
+    def compute_forces(self):
+        for i in range(self.n_vertices):
+            self.force[i] = ti.Vector([0.0, 0.0, 0.0])
+        self.elastic_energy[None] = 0.0
+        self.mean_j_sum[None] = 0.0
+
+        for e in range(self.n_tets):
+            tet = self.tets[e]
+            x0 = self.x[tet[0]]
+            x1 = self.x[tet[1]]
+            x2 = self.x[tet[2]]
+            x3 = self.x[tet[3]]
+            ds = ti.Matrix.cols([x1 - x0, x2 - x0, x3 - x0])
+            F = ds @ self.dm_inv[e]
+
+            P = ti.Matrix.zero(ti.f32, 3, 3)
+            energy_density = 0.0
+            if self.constitutive_model[None] == 1:
+                P = neo_hookean_pk1_ti(F, self.mu, self.la)
+                energy_density = neo_hookean_energy_density(F, self.mu, self.la)
+            else:
+                P = corotated_pk1_ti(F, self.mu, self.la)
+                energy_density = corotated_energy_density(F, self.mu, self.la)
+
+            H = -self.volume[e] * P @ self.dm_inv[e].transpose()
+            f1 = ti.Vector([H[0, 0], H[1, 0], H[2, 0]])
+            f2 = ti.Vector([H[0, 1], H[1, 1], H[2, 1]])
+            f3 = ti.Vector([H[0, 2], H[1, 2], H[2, 2]])
+            f0 = -f1 - f2 - f3
+
+            for d in ti.static(range(3)):
+                ti.atomic_add(self.force[tet[0]][d], f0[d])
+                ti.atomic_add(self.force[tet[1]][d], f1[d])
+                ti.atomic_add(self.force[tet[2]][d], f2[d])
+                ti.atomic_add(self.force[tet[3]][d], f3[d])
+
+            ti.atomic_add(self.elastic_energy[None], self.volume[e] * energy_density)
+            ti.atomic_add(self.mean_j_sum[None], F.determinant())
+
+    @ti.kernel
+    def integrate_and_collide(
+        self,
+        dt: ti.f32,
+        damping: ti.f32,
+        gravity_y: ti.f32,
+        max_velocity: ti.f32,
+        left: ti.f32,
+        right: ti.f32,
+        left_vel: ti.f32,
+        right_vel: ti.f32,
+        y0: ti.f32,
+        y1: ti.f32,
+        z0: ti.f32,
+        z1: ti.f32,
+        skin: ti.f32,
+    ):
+        self.kinetic_energy[None] = 0.0
+        damp = ti.max(0.0, 1.0 - damping * dt)
+        eps = 0.002
+        for i in range(self.n_vertices):
+            acc = self.force[i] / self.mass[i] + ti.Vector([0.0, gravity_y, 0.0])
+            vel = (self.v[i] + acc * dt) * damp
+            speed = vel.norm()
+            if max_velocity > 0.0 and speed > max_velocity:
+                vel *= max_velocity / speed
+
+            pos = self.x[i] + vel * dt
+            in_plate = pos[1] >= y0 and pos[1] <= y1 and pos[2] >= z0 and pos[2] <= z1
+            if in_plate:
+                left_limit = left + skin
+                right_limit = right - skin
+                if pos[0] < left_limit:
+                    correction = left_limit - pos[0]
+                    pos[0] = left_limit
+                    vel[0] = ti.max(vel[0], left_vel)
+                    ti.atomic_add(self.contact_force[None], self.mass[i] * correction / (dt * dt))
+                if pos[0] > right_limit:
+                    correction = pos[0] - right_limit
+                    pos[0] = right_limit
+                    vel[0] = ti.min(vel[0], right_vel)
+                    ti.atomic_add(self.contact_force[None], self.mass[i] * correction / (dt * dt))
+
+            pos[0] = ti.min(ti.max(pos[0], eps), self.domain_size - eps)
+            pos[1] = ti.min(ti.max(pos[1], eps), self.domain_size - eps)
+            pos[2] = ti.min(ti.max(pos[2], eps), self.domain_size - eps)
+
+            self.x[i] = pos
+            self.v[i] = vel
+            ti.atomic_add(self.kinetic_energy[None], 0.5 * self.mass[i] * vel.dot(vel))
+
+    def mean_j(self) -> float:
+        return float(self.mean_j_sum[None]) / max(1, self.n_tets)
 
 
 def run_simulation(config: dict, config_path: Path, frame_override: int | None, no_render: bool) -> Path:
@@ -286,6 +381,14 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     la = young * poisson / ((1.0 + poisson) * (1.0 - 2.0 * poisson))
     constitutive_model = config.get("constitutive_model", "corotated").lower()
 
+    ti.init(
+        arch=arch_from_name(config.get("arch", "cpu")),
+        default_fp=ti.f32,
+        random_seed=int(config.get("seed", 0)),
+        offline_cache=False,
+    )
+    sim = TaichiFEM3DSimulator(x, tets, dm_inv, volumes, masses, mu, la, constitutive_model, float(config["domain_size_m"]))
+
     fps = int(config["fps"])
     max_frames = int(frame_override if frame_override is not None else config["max_frames"])
     substeps = int(config["substeps_per_frame"])
@@ -307,25 +410,37 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     for frame in range(max_frames):
         frame_start = time.perf_counter()
         frame_force = 0.0
-        elastic = 0.0
         mean_j = 1.0
         t = frame / fps
         left, right, left_vel, right_vel, squeeze_disp = plate_motion(config, t)
+        sim.reset_frame_stats()
 
         for substep_id in range(substeps):
             sub_t = t + substep_id * dt
             left, right, left_vel, right_vel, squeeze_disp = plate_motion(config, sub_t)
-            forces, elastic, mean_j = compute_forces(x, tets, dm_inv, volumes, mu, la, constitutive_model)
-            v += (forces / masses[:, None] + gravity) * dt
-            v *= max(0.0, 1.0 - damping * dt)
-            clip_velocity(v, max_velocity)
-            x += v * dt
-            eps = 0.002
-            x[:] = np.clip(x, eps, domain_size - eps)
-            frame_force += project_plates(x, v, masses, left, right, left_vel, right_vel, y0, y1, z0, z1, skin, dt)
+            sim.compute_forces()
+            sim.integrate_and_collide(
+                dt,
+                damping,
+                float(gravity[1]),
+                max_velocity,
+                left,
+                right,
+                left_vel,
+                right_vel,
+                y0,
+                y1,
+                z0,
+                z1,
+                skin,
+            )
 
+        x = sim.x.to_numpy()
         stats = particle_geometry(x)
-        kinetic = float(0.5 * np.sum(masses[:, None] * v * v))
+        frame_force = float(sim.contact_force[None])
+        mean_j = sim.mean_j()
+        kinetic = float(sim.kinetic_energy[None])
+        elastic = float(sim.elastic_energy[None])
         wall_ms = (time.perf_counter() - frame_start) * 1000.0
         rows.append(
             {

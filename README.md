@@ -1,78 +1,72 @@
-# GKCIV Taichi MPM Squeeze Experiment
+# GKCIV Taichi 3D Soft-Body Squeeze Experiments
 
-This project implements the Taichi part of the GKCIV soft-body squeeze comparison. The current code path uses only a 2D MLS-MPM solver and exports both simulation metrics and analysis plots.
+This project runs a standardized 3D squeeze benchmark for Taichi soft-body simulation methods.
+The current experiment matrix contains 20 runs:
 
-The squeeze fixture is modeled as two finite-thickness kinematic rigid plates. They move by a prescribed displacement path, collide with the MPM material through grid velocity constraints, and project escaped particles back outside the plate volume to prevent visible penetration.
+- MPM Neo-Hookean / Corotated, sphere and cube, soft and hard materials
+- FEM Neo-Hookean / Corotated, sphere and cube, soft and hard materials
+- PBD sphere and cube, soft and hard constraint settings
 
-## 1. Environment
+The timestep cores for MPM, FEM, and PBD are implemented with Taichi kernels. Python is used for
+configuration, mesh/point-cloud setup, metrics export, and rendering orchestration.
 
-```powershell
-conda activate GKCIV
-```
-
-If the environment has not been created yet:
+## Environment
 
 ```powershell
 conda env create -f environment.yml
 conda activate GKCIV
 ```
 
-## 2. Run A Simulation
-
-Sphere scene:
+If the environment already exists:
 
 ```powershell
-python -m taichi_squeeze.src.simulate_mpm --config taichi_squeeze/configs/sphere_50mm_soft.json
+conda activate GKCIV
 ```
 
-Rounded cube scene:
+## Generate Configs
 
 ```powershell
-python -m taichi_squeeze.src.simulate_mpm --config taichi_squeeze/configs/cube_50mm_soft.json
+python generate_configs.py
 ```
 
-Each run writes:
+This recreates the 20 experiment JSON files in `taichi_squeeze/configs/` while preserving
+`camera.json` and `color_scheme.json`.
 
-- `metrics.csv`
-- rendered PNG frames
-- `preview.gif`
-- `used_config.json`
+## Run All Experiments
 
-## 3. Generate Analysis Plots
+Metrics-only run:
 
 ```powershell
-python -m taichi_squeeze.analysis.compare_curves --outputs outputs
+python run_all.py --no-render
 ```
 
-The analysis script scans all `outputs/*/metrics.csv` files and writes plots into `outputs/analysis/`.
-
-## 4. Useful Quick Test
-
-For a shorter smoke test:
+Full metrics plus PNG/GIF rendering:
 
 ```powershell
-python -m taichi_squeeze.src.simulate_mpm --config taichi_squeeze/configs/sphere_50mm_soft.json --frames 20 --no-render
-python -m taichi_squeeze.analysis.compare_curves --outputs outputs
+python run_all.py
 ```
 
-## 5. Run 3D MPM Experiments
-
-The 3D solvers are separate from the 2D solver. The six 3D configs share the same plate geometry, material parameters, and squeeze timing so their rebound curves can be compared.
+Useful filters:
 
 ```powershell
-python -m taichi_squeeze.src.simulate_mpm3d --config taichi_squeeze/configs/sphere_3d_40mm_soft.json
-python -m taichi_squeeze.src.simulate_mpm3d --config taichi_squeeze/configs/box_3d_45x35x35_soft.json
-python -m taichi_squeeze.src.simulate_pbd3d --config taichi_squeeze/configs/sphere_3d_40mm_pbd.json
-python -m taichi_squeeze.src.simulate_pbd3d --config taichi_squeeze/configs/box_3d_45x35x35_pbd.json
-python -m taichi_squeeze.src.simulate_fem3d --config taichi_squeeze/configs/sphere_3d_40mm_fem.json
-python -m taichi_squeeze.src.simulate_fem3d --config taichi_squeeze/configs/box_3d_45x35x35_fem.json
-python -m taichi_squeeze.analysis.compare_curves --outputs outputs --contains 3d_sphere --out outputs/analysis_3d_sphere
+python run_all.py --frames 10 --no-render
+python run_all.py --filter fem3d --frames 10 --no-render
+python run_all.py --filter sphere_40mm_soft
 ```
 
-For a faster 3D smoke test:
+## Single Solver Runs
 
 ```powershell
-python -m taichi_squeeze.src.simulate_mpm3d --config taichi_squeeze/configs/sphere_3d_40mm_soft.json --frames 10 --no-render
-python -m taichi_squeeze.src.simulate_pbd3d --config taichi_squeeze/configs/sphere_3d_40mm_pbd.json --frames 10 --no-render
-python -m taichi_squeeze.src.simulate_fem3d --config taichi_squeeze/configs/sphere_3d_40mm_fem.json --frames 10 --no-render
+python -m taichi_squeeze.src.simulate_mpm3d --config taichi_squeeze/configs/mpm3d_sphere_40mm_soft_corotated.json --frames 10 --no-render
+python -m taichi_squeeze.src.simulate_fem3d --config taichi_squeeze/configs/fem3d_sphere_40mm_soft_corotated.json --frames 10 --no-render
+python -m taichi_squeeze.src.simulate_pbd3d --config taichi_squeeze/configs/pbd3d_sphere_40mm_soft.json --frames 10 --no-render
 ```
+
+## Analysis
+
+```powershell
+python -m taichi_squeeze.analysis.compare_curves --outputs outputs --out outputs/analysis
+```
+
+Each run writes `metrics.csv`, `used_config.json`, optional PNG frames, and `preview.gif` into its
+own directory under `outputs/`.
