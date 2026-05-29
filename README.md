@@ -66,7 +66,7 @@ python -m taichi_squeeze.src.simulate_pbd3d --config taichi_squeeze/configs/sphe
 python -m taichi_squeeze.src.simulate_pbd3d --config taichi_squeeze/configs/box_3d_45x35x35_pbd.json
 python -m taichi_squeeze.src.simulate_fem3d --config taichi_squeeze/configs/sphere_3d_40mm_fem.json
 python -m taichi_squeeze.src.simulate_fem3d --config taichi_squeeze/configs/box_3d_45x35x35_fem.json
-python -m taichi_squeeze.analysis.compare_curves --outputs outputs --contains 3d --out outputs/analysis_3d
+python -m taichi_squeeze.analysis.compare_curves --outputs outputs --contains 3d_sphere --out outputs/analysis_3d_sphere
 ```
 
 For a faster 3D smoke test:

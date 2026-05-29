@@ -10,6 +10,14 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
+STYLE_BY_SOLVER = {
+    "mpm": {"color": "#2563eb", "label": "MPM", "marker": "o"},
+    "mpm3d": {"color": "#2563eb", "label": "MPM", "marker": "o"},
+    "pbd3d": {"color": "#16a34a", "label": "PBD", "marker": "s"},
+    "fem3d": {"color": "#dc2626", "label": "FEM", "marker": "^"},
+}
+
+
 def find_metric_files(outputs: Path, contains: str | None = None) -> list[Path]:
     paths = sorted(path for path in outputs.glob("*/metrics.csv") if path.is_file())
     if contains:
@@ -28,14 +36,47 @@ def load_metrics(paths: list[Path]) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def style_for_group(group: pd.DataFrame, fallback_label: str) -> dict:
+    solver = str(group["solver"].iloc[0]).lower()
+    style = STYLE_BY_SOLVER.get(solver, {})
+    return {
+        "label": style.get("label", fallback_label.replace("taichi_", "").replace("_", " ")),
+        "color": style.get("color", None),
+        "marker": style.get("marker", "o"),
+    }
+
+
 def plot_lines(df: pd.DataFrame, x: str, y: str, out: Path, xlabel: str, ylabel: str) -> None:
-    fig, ax = plt.subplots(figsize=(8, 5), dpi=140)
+    fig, ax = plt.subplots(figsize=(9.5, 5.6), dpi=160)
+    plotted = 0
     for label, group in df.groupby("run_dir"):
-        ax.plot(group[x], group[y], label=label, linewidth=1.8)
+        group = group.sort_values(x if x != "normalized_compression" else "frame")
+        values = pd.to_numeric(group[y], errors="coerce")
+        xs = pd.to_numeric(group[x], errors="coerce")
+        mask = values.notna() & xs.notna()
+        if not mask.any():
+            continue
+        style = style_for_group(group, label)
+        ax.plot(
+            xs[mask],
+            values[mask],
+            label=style["label"],
+            color=style["color"],
+            linewidth=2.8,
+            marker=style["marker"],
+            markersize=4.0,
+            markevery=max(1, len(group) // 8),
+            alpha=0.95,
+        )
+        plotted += 1
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.grid(True, color="#dfe6e9", linewidth=0.7)
-    ax.legend()
+    ax.grid(True, color="#d6dde3", linewidth=0.8)
+    ax.set_facecolor("#fbfdff")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    if plotted:
+        ax.legend(frameon=False, ncols=min(plotted, 3), loc="best")
     fig.tight_layout()
     fig.savefig(out)
     plt.close(fig)
