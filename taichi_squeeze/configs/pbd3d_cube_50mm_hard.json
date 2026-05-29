@@ -1,8 +1,8 @@
 {
     "solver": "pbd3d",
     "constitutive_model": "none",
-    "scene": "pbd3d_sphere_40mm_soft",
-    "shape": "sphere",
+    "scene": "pbd3d_cube_50mm_hard",
+    "shape": "box",
     "object_center_m": [
         0.05,
         0.05,
@@ -32,7 +32,11 @@
     "gravity_m_s2": 0.0,
     "arch": "cpu",
     "seed": 42,
-    "output_dir": "outputs/pbd3d_sphere_40mm_soft",
+    "output_dir": "outputs/pbd3d_cube_50mm_hard",
     "render_every": 1,
-    "object_diameter_m": 0.04
+    "object_size_m": [
+        0.05,
+        0.05,
+        0.05
+    ]
 }

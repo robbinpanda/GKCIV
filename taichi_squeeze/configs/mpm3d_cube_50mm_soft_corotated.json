@@ -1,23 +1,20 @@
 {
-    "solver": "pbd3d",
-    "constitutive_model": "none",
-    "scene": "pbd3d_sphere_40mm_soft",
-    "shape": "sphere",
+    "solver": "mpm3d",
+    "constitutive_model": "corotated",
+    "scene": "mpm3d_cube_50mm_soft_corotated",
+    "shape": "box",
     "object_center_m": [
         0.05,
         0.05,
         0.05
     ],
     "density_kg_m3": 1000,
-    "lattice_resolution": [
-        12,
-        12,
-        12
-    ],
-    "constraint_stiffness": 0.8,
-    "pbd_iterations": 5,
+    "young_modulus_pa": 30000,
+    "poisson_ratio": 0.35,
+    "n_particles": 4000,
+    "n_grid": 32,
     "domain_size_m": 0.1,
-    "dt": 0.001,
+    "dt": 0.0001,
     "substeps_per_frame": 10,
     "fps": 60,
     "max_frames": 390,
@@ -32,7 +29,11 @@
     "gravity_m_s2": 0.0,
     "arch": "cpu",
     "seed": 42,
-    "output_dir": "outputs/pbd3d_sphere_40mm_soft",
+    "output_dir": "outputs/mpm3d_cube_50mm_soft_corotated",
     "render_every": 1,
-    "object_diameter_m": 0.04
+    "object_size_m": [
+        0.05,
+        0.05,
+        0.05
+    ]
 }

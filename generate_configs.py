@@ -1,0 +1,186 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+CONFIGS_DIR = Path("taichi_squeeze/configs")
+
+SCENES = [
+    {
+        "scene_id": "sphere_40mm",
+        "shape": "sphere",
+        "object_diameter_m": 0.04,
+        "object_center_m": [0.05, 0.05, 0.05],
+    },
+    {
+        "scene_id": "cube_50mm",
+        "shape": "box",
+        "object_size_m": [0.05, 0.05, 0.05],
+        "object_center_m": [0.05, 0.05, 0.05],
+    },
+]
+
+STIFFNESS = [
+    {"stiffness_id": "soft", "young_modulus_pa": 30000},
+    {"stiffness_id": "hard", "young_modulus_pa": 80000},
+]
+
+MPM_CONFIGS = [
+    {"solver": "mpm3d", "constitutive_model": "corotated"},
+    {"solver": "mpm3d", "constitutive_model": "neo_hookean"},
+]
+
+FEM_CONFIGS = [
+    {"solver": "fem3d", "constitutive_model": "corotated"},
+    {"solver": "fem3d", "constitutive_model": "neo_hookean"},
+]
+
+PBD_CONFIG = {"solver": "pbd3d", "constitutive_model": "none"}
+
+
+def make_mpm_config(scene: dict, stiff: dict, model: dict) -> dict:
+    name = f"{model['solver']}_{scene['scene_id']}_{stiff['stiffness_id']}_{model['constitutive_model']}"
+    cfg = {
+        "solver": model["solver"],
+        "constitutive_model": model["constitutive_model"],
+        "scene": name,
+        "shape": scene["shape"],
+        "object_center_m": scene["object_center_m"],
+        "density_kg_m3": 1000,
+        "young_modulus_pa": stiff["young_modulus_pa"],
+        "poisson_ratio": 0.35,
+        "n_particles": 4000,
+        "n_grid": 32,
+        "domain_size_m": 0.1,
+        "dt": 0.0001,
+        "substeps_per_frame": 10,
+        "fps": 60,
+        "max_frames": 390,
+        "initial_gap_ratio": 1.05,
+        "min_gap_ratio": 0.70,
+        "compress_time_s": 1.0,
+        "hold_time_s": 0.5,
+        "release_time_s": 1.0,
+        "plate_thickness_m": 0.006,
+        "contact_skin_m": 0.001,
+        "velocity_damping": 0.0,
+        "gravity_m_s2": 0.0,
+        "arch": "cpu",
+        "seed": 42,
+        "output_dir": f"outputs/{name}",
+        "render_every": 1,
+    }
+    if scene["shape"] == "sphere":
+        cfg["object_diameter_m"] = scene["object_diameter_m"]
+    else:
+        cfg["object_size_m"] = scene["object_size_m"]
+    return cfg
+
+
+def make_fem_config(scene: dict, stiff: dict, model: dict) -> dict:
+    name = f"{model['solver']}_{scene['scene_id']}_{stiff['stiffness_id']}_{model['constitutive_model']}"
+    cfg = {
+        "solver": model["solver"],
+        "constitutive_model": model["constitutive_model"],
+        "scene": name,
+        "shape": scene["shape"],
+        "object_center_m": scene["object_center_m"],
+        "density_kg_m3": 1000,
+        "young_modulus_pa": stiff["young_modulus_pa"],
+        "poisson_ratio": 0.35,
+        "mesh_resolution": [8, 8, 8],
+        "domain_size_m": 0.1,
+        "dt": 0.0001,
+        "substeps_per_frame": 10,
+        "fps": 60,
+        "max_frames": 390,
+        "initial_gap_ratio": 1.05,
+        "min_gap_ratio": 0.70,
+        "compress_time_s": 1.0,
+        "hold_time_s": 0.5,
+        "release_time_s": 1.0,
+        "plate_thickness_m": 0.006,
+        "contact_skin_m": 0.001,
+        "velocity_damping": 0.0,
+        "gravity_m_s2": 0.0,
+        "arch": "cpu",
+        "seed": 42,
+        "output_dir": f"outputs/{name}",
+        "render_every": 1,
+    }
+    if scene["shape"] == "sphere":
+        cfg["object_diameter_m"] = scene["object_diameter_m"]
+    else:
+        cfg["object_size_m"] = scene["object_size_m"]
+    return cfg
+
+
+def make_pbd_config(scene: dict, stiff: dict) -> dict:
+    name = f"pbd3d_{scene['scene_id']}_{stiff['stiffness_id']}"
+    cfg = {
+        "solver": "pbd3d",
+        "constitutive_model": "none",
+        "scene": name,
+        "shape": scene["shape"],
+        "object_center_m": scene["object_center_m"],
+        "density_kg_m3": 1000,
+        "lattice_resolution": [12, 12, 12],
+        "constraint_stiffness": 0.8,
+        "pbd_iterations": 5,
+        "domain_size_m": 0.1,
+        "dt": 0.001,
+        "substeps_per_frame": 10,
+        "fps": 60,
+        "max_frames": 390,
+        "initial_gap_ratio": 1.05,
+        "min_gap_ratio": 0.70,
+        "compress_time_s": 1.0,
+        "hold_time_s": 0.5,
+        "release_time_s": 1.0,
+        "plate_thickness_m": 0.006,
+        "contact_skin_m": 0.001,
+        "velocity_damping": 0.0,
+        "gravity_m_s2": 0.0,
+        "arch": "cpu",
+        "seed": 42,
+        "output_dir": f"outputs/{name}",
+        "render_every": 1,
+    }
+    if scene["shape"] == "sphere":
+        cfg["object_diameter_m"] = scene["object_diameter_m"]
+    else:
+        cfg["object_size_m"] = scene["object_size_m"]
+    return cfg
+
+
+def main() -> None:
+    CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    count = 0
+    for scene in SCENES:
+        for stiff in STIFFNESS:
+            for model in MPM_CONFIGS:
+                cfg = make_mpm_config(scene, stiff, model)
+                path = CONFIGS_DIR / f"{cfg['scene']}.json"
+                path.write_text(json.dumps(cfg, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
+                count += 1
+                print(f"Generated: {path.name}")
+
+            for model in FEM_CONFIGS:
+                cfg = make_fem_config(scene, stiff, model)
+                path = CONFIGS_DIR / f"{cfg['scene']}.json"
+                path.write_text(json.dumps(cfg, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
+                count += 1
+                print(f"Generated: {path.name}")
+
+            cfg = make_pbd_config(scene, stiff)
+            path = CONFIGS_DIR / f"{cfg['scene']}.json"
+            path.write_text(json.dumps(cfg, indent=4, ensure_ascii=False) + "\n", encoding="utf-8")
+            count += 1
+            print(f"Generated: {path.name}")
+
+    print(f"\nTotal: {count} configs generated")
+
+
+if __name__ == "__main__":
+    main()
