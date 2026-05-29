@@ -37,7 +37,7 @@
     "seed": 42,
     "output_dir": "outputs/fem3d_cube_50mm_hard_corotated",
     "render_every": 1,
-    "render_backend": "pyvista",
+    "render_backend": "matplotlib",
     "particle_radius_m": 0.001,
     "object_size_m": [
         0.05,

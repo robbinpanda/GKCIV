@@ -1,5 +1,7 @@
 {
-    "soft_body": "#4a90d9",
-    "plate": "#e74c3c",
-    "background": "#f8fafc"
+    "soft_body": "#2f8fd8",
+    "plate": "#d86b5f",
+    "background": "#f8fafc",
+    "floor": "#e5e7eb",
+    "shadow": "#94a3b8"
 }

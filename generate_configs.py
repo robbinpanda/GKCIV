@@ -69,7 +69,7 @@ def make_mpm_config(scene: dict, stiff: dict, model: dict) -> dict:
         "seed": 42,
         "output_dir": f"outputs/{name}",
         "render_every": 1,
-        "render_backend": "pyvista",
+        "render_backend": "matplotlib",
         "particle_radius_m": 0.0009,
     }
     if scene["shape"] == "sphere":
@@ -113,7 +113,7 @@ def make_fem_config(scene: dict, stiff: dict, model: dict) -> dict:
         "seed": 42,
         "output_dir": f"outputs/{name}",
         "render_every": 1,
-        "render_backend": "pyvista",
+        "render_backend": "matplotlib",
         "particle_radius_m": 0.0010,
     }
     if scene["shape"] == "sphere":
@@ -154,7 +154,7 @@ def make_pbd_config(scene: dict, stiff: dict) -> dict:
         "seed": 42,
         "output_dir": f"outputs/{name}",
         "render_every": 1,
-        "render_backend": "pyvista",
+        "render_backend": "matplotlib",
         "particle_radius_m": 0.0010,
     }
     if scene["shape"] == "sphere":

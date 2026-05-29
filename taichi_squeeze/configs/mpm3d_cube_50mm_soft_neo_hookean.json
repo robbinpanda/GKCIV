@@ -31,7 +31,7 @@
     "seed": 42,
     "output_dir": "outputs/mpm3d_cube_50mm_soft_neo_hookean",
     "render_every": 1,
-    "render_backend": "pyvista",
+    "render_backend": "matplotlib",
     "particle_radius_m": 0.0009,
     "object_size_m": [
         0.05,

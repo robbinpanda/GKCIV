@@ -40,7 +40,8 @@ Metrics-only run:
 python run_all.py --no-render
 ```
 
-Full metrics plus PNG/GIF rendering:
+Full metrics plus PNG/GIF rendering. The default renderer is the original Matplotlib 3D view because
+it preserves the coordinate axes and plate/object spatial relationship most clearly:
 
 ```powershell
 python run_all.py
@@ -53,6 +54,9 @@ python run_all.py --frames 10 --no-render
 python run_all.py --filter fem3d --frames 10 --no-render
 python run_all.py --filter sphere_40mm_soft
 ```
+
+PyVista rendering remains available by setting `"render_backend": "pyvista"` in selected configs,
+but it is not the default for report-quality batch output.
 
 ## Single Solver Runs
 

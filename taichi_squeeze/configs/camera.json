@@ -1,7 +1,9 @@
 {
-    "elev": 24,
-    "azim": 82,
-    "zoom": 1.35,
+    "elev": 22,
+    "azim": -38,
+    "zoom": 1.75,
     "resolution": [960, 720],
-    "bgcolor": "#f8fafc"
+    "bgcolor": "#f8fafc",
+    "parallel_projection": true,
+    "parallel_scale": 0.66
 }

@@ -35,7 +35,7 @@
     "seed": 42,
     "output_dir": "outputs/pbd3d_sphere_40mm_soft",
     "render_every": 1,
-    "render_backend": "pyvista",
+    "render_backend": "matplotlib",
     "particle_radius_m": 0.001,
     "object_diameter_m": 0.04
 }
