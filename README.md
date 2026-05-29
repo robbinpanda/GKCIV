@@ -2,6 +2,8 @@
 
 This project implements the Taichi part of the GKCIV soft-body squeeze comparison. The current code path uses only a 2D MLS-MPM solver and exports both simulation metrics and analysis plots.
 
+The squeeze fixture is modeled as two finite-thickness kinematic rigid plates. They move by a prescribed displacement path, collide with the MPM material through grid velocity constraints, and project escaped particles back outside the plate volume to prevent visible penetration.
+
 ## 1. Environment
 
 ```powershell
@@ -52,4 +54,3 @@ For a shorter smoke test:
 python -m taichi_squeeze.src.simulate_mpm --config taichi_squeeze/configs/sphere_50mm_soft.json --frames 20 --no-render
 python -m taichi_squeeze.analysis.compare_curves --outputs outputs
 ```
-

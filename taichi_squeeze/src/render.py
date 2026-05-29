@@ -14,6 +14,9 @@ def render_frame(
     points: np.ndarray,
     left_plate_m: float,
     right_plate_m: float,
+    plate_thickness_m: float,
+    plate_y_min_m: float,
+    plate_y_max_m: float,
     domain_size_m: float,
     output_path: Path,
     title: str,
@@ -22,8 +25,25 @@ def render_frame(
 
     fig, ax = plt.subplots(figsize=(6, 6), dpi=130)
     ax.scatter(points[:, 0], points[:, 1], s=0.45, c="#2f80ed", alpha=0.8, linewidths=0)
-    ax.axvline(left_plate_m, color="#2d3436", linewidth=2.0)
-    ax.axvline(right_plate_m, color="#2d3436", linewidth=2.0)
+    plate_height = plate_y_max_m - plate_y_min_m
+    left_plate = plt.Rectangle(
+        (left_plate_m - plate_thickness_m, plate_y_min_m),
+        plate_thickness_m,
+        plate_height,
+        facecolor="#636e72",
+        edgecolor="#2d3436",
+        linewidth=1.5,
+    )
+    right_plate = plt.Rectangle(
+        (right_plate_m, plate_y_min_m),
+        plate_thickness_m,
+        plate_height,
+        facecolor="#636e72",
+        edgecolor="#2d3436",
+        linewidth=1.5,
+    )
+    ax.add_patch(left_plate)
+    ax.add_patch(right_plate)
     ax.set_xlim(0.0, domain_size_m)
     ax.set_ylim(0.0, domain_size_m)
     ax.set_aspect("equal", adjustable="box")

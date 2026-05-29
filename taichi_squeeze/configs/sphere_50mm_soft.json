@@ -11,6 +11,9 @@
   "object_diameter_m": 0.05,
   "object_depth_m": 0.05,
   "object_center_m": [0.06, 0.06],
+  "plate_thickness_m": 0.006,
+  "plate_height_m": 0.085,
+  "contact_skin_m": 0.0008,
   "density_kg_m3": 1000.0,
   "young_modulus_pa": 30000.0,
   "poisson_ratio": 0.35,
@@ -28,4 +31,3 @@
   "settle_time_s": 0.80,
   "render_every": 1
 }
-

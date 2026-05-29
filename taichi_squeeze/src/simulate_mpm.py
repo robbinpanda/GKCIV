@@ -119,6 +119,22 @@ def plate_motion(config: dict, t: float) -> tuple[float, float, float, float, fl
     return left, right, left_velocity, right_velocity, squeeze_disp
 
 
+def plate_vertical_span(config: dict) -> tuple[float, float]:
+    center_y = float(config["object_center_m"][1])
+    height = float(config.get("plate_height_m", config["object_diameter_m"]))
+    return center_y - height * 0.5, center_y + height * 0.5
+
+
+def plate_penetration(points: np.ndarray, left_face: float, right_face: float, y_min: float, y_max: float) -> float:
+    inside_height = (points[:, 1] >= y_min) & (points[:, 1] <= y_max)
+    if not np.any(inside_height):
+        return 0.0
+    side_points = points[inside_height]
+    left_depth = np.maximum(0.0, left_face - side_points[:, 0])
+    right_depth = np.maximum(0.0, side_points[:, 0] - right_face)
+    return float(max(left_depth.max(initial=0.0), right_depth.max(initial=0.0)))
+
+
 @ti.data_oriented
 class MPMSimulator:
     def __init__(self, config: dict, initial_positions: np.ndarray):
@@ -165,7 +181,16 @@ class MPMSimulator:
             self.J[p] = 1.0
 
     @ti.kernel
-    def substep(self, left_plate: ti.f32, right_plate: ti.f32, left_vel: ti.f32, right_vel: ti.f32):
+    def substep(
+        self,
+        left_plate: ti.f32,
+        right_plate: ti.f32,
+        left_vel: ti.f32,
+        right_vel: ti.f32,
+        plate_y_min: ti.f32,
+        plate_y_max: ti.f32,
+        contact_skin: ti.f32,
+    ):
         for i, j in self.grid_m:
             self.grid_v[i, j] = ti.Vector([0.0, 0.0])
             self.grid_m[i, j] = 0.0
@@ -216,11 +241,12 @@ class MPMSimulator:
                 if node_pos[1] > self.domain_size - padding and velocity[1] > 0.0:
                     velocity[1] = 0.0
 
-                if node_pos[0] < left_plate and velocity[0] < left_vel:
+                in_plate_height = node_pos[1] >= plate_y_min and node_pos[1] <= plate_y_max
+                if in_plate_height and node_pos[0] < left_plate and velocity[0] < left_vel:
                     impulse = mass * (left_vel - velocity[0])
                     velocity[0] = left_vel
                     ti.atomic_add(self.contact_force[None], ti.abs(impulse) / self.dt)
-                if node_pos[0] > right_plate and velocity[0] > right_vel:
+                if in_plate_height and node_pos[0] > right_plate and velocity[0] > right_vel:
                     impulse = mass * (right_vel - velocity[0])
                     velocity[0] = right_vel
                     ti.atomic_add(self.contact_force[None], ti.abs(impulse) / self.dt)
@@ -252,6 +278,20 @@ class MPMSimulator:
             self.x[p] += self.dt * self.v[p]
 
             eps = 2.0 * self.dx
+            if self.x[p][1] >= plate_y_min and self.x[p][1] <= plate_y_max:
+                left_limit = left_plate + contact_skin
+                right_limit = right_plate - contact_skin
+                if self.x[p][0] < left_limit:
+                    correction = left_limit - self.x[p][0]
+                    self.x[p][0] = left_limit
+                    self.v[p][0] = ti.max(self.v[p][0], left_vel)
+                    ti.atomic_add(self.contact_force[None], self.p_mass * correction / (self.dt * self.dt))
+                if self.x[p][0] > right_limit:
+                    correction = self.x[p][0] - right_limit
+                    self.x[p][0] = right_limit
+                    self.v[p][0] = ti.min(self.v[p][0], right_vel)
+                    ti.atomic_add(self.contact_force[None], self.p_mass * correction / (self.dt * self.dt))
+
             self.x[p][0] = ti.min(ti.max(self.x[p][0], eps), self.domain_size - eps)
             self.x[p][1] = ti.min(ti.max(self.x[p][1], eps), self.domain_size - eps)
 
@@ -291,6 +331,9 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     dt = float(config["dt"])
     domain_size = float(config["domain_size_m"])
     render_every = int(config.get("render_every", 1))
+    plate_thickness = float(config.get("plate_thickness_m", 0.006))
+    plate_y_min, plate_y_max = plate_vertical_span(config)
+    contact_skin = float(config.get("contact_skin_m", sim.dx * 0.5))
 
     rows = []
     rendered_frames: list[Path] = []
@@ -304,14 +347,14 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
         for substep_id in range(substeps):
             sub_t = t + substep_id * dt
             left, right, left_vel, right_vel, squeeze_disp = plate_motion(config, sub_t)
-            sim.substep(left, right, left_vel, right_vel)
+            sim.substep(left, right, left_vel, right_vel, plate_y_min, plate_y_max, contact_skin)
             frame_force += float(sim.contact_force[None])
 
         sim.compute_energy()
         points = sim.x.to_numpy()
         stats = particle_geometry(points)
         mean_j = float(np.mean(sim.J.to_numpy()))
-        penetration = max(0.0, left - stats.min_x_m, stats.max_x_m - right)
+        penetration = plate_penetration(points, left, right, plate_y_min, plate_y_max)
         wall_ms = (time.perf_counter() - frame_start) * 1000.0
 
         rows.append(
@@ -341,7 +384,17 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
         if not no_render and frame % render_every == 0:
             frame_path = frames_dir / f"frame_{frame:04d}.png"
             title = f"{config['scene']}  t={t:.2f}s"
-            render_frame(points, left, right, domain_size, frame_path, title)
+            render_frame(
+                points,
+                left,
+                right,
+                plate_thickness,
+                plate_y_min,
+                plate_y_max,
+                domain_size,
+                frame_path,
+                title,
+            )
             rendered_frames.append(frame_path)
 
         if frame == 0 or (frame + 1) % 10 == 0 or frame + 1 == max_frames:
