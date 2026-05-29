@@ -2,34 +2,22 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import shutil
 import time
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial import Delaunay
 
 from taichi_squeeze.src.constitutive import corotated_pk1_and_energy, neo_hookean_pk1_and_energy
+from taichi_squeeze.src.geometry3d import object_size, squeeze_diameter, spherical_point_cloud
 from taichi_squeeze.src.metrics import write_metrics_csv
-from taichi_squeeze.src.render3d import render_frame_3d, write_preview_gif
+from taichi_squeeze.src.render3d import render_frame_auto, write_preview_gif
 
 
 def load_config(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
-
-
-def object_size(config: dict) -> np.ndarray:
-    if config["shape"] == "sphere":
-        d = float(config["object_diameter_m"])
-        return np.array([d, d, d], dtype=np.float64)
-    return np.array(config["object_size_m"], dtype=np.float64)
-
-
-def squeeze_diameter(config: dict) -> float:
-    if "object_diameter_m" in config:
-        return float(config["object_diameter_m"])
-    return float(config["object_size_m"][0])
 
 
 def plate_motion(config: dict, t: float) -> tuple[float, float, float, float, float]:
@@ -84,6 +72,15 @@ def particle_geometry(points: np.ndarray) -> dict[str, float]:
 
 
 def build_vertices(config: dict) -> tuple[np.ndarray, dict[tuple[int, int, int], int], np.ndarray]:
+    if config["shape"] == "sphere":
+        vertices, _ = spherical_point_cloud(
+            config,
+            resolution_key="mesh_resolution",
+            surface_key="sphere_surface_points",
+            default_surface_points=192,
+        )
+        return vertices, {}, np.array(config["mesh_resolution"], dtype=int)
+
     center = np.array(config["object_center_m"], dtype=np.float64)
     size = object_size(config)
     res = np.array(config["mesh_resolution"], dtype=int)
@@ -102,6 +99,19 @@ def build_vertices(config: dict) -> tuple[np.ndarray, dict[tuple[int, int, int],
                     lookup[(i, j, k)] = len(vertices)
                     vertices.append(p)
     return np.array(vertices, dtype=np.float64), lookup, res
+
+
+def build_sphere_tets(config: dict, vertices: np.ndarray) -> np.ndarray:
+    center = np.array(config["object_center_m"], dtype=np.float64)
+    radius = float(config["object_diameter_m"]) * 0.5
+    delaunay = Delaunay(vertices)
+    simplices = delaunay.simplices.astype(np.int32)
+    centroids = vertices[simplices].mean(axis=1)
+    inside = np.linalg.norm(centroids - center, axis=1) <= radius * 1.001
+    tets = simplices[inside]
+    if len(tets) == 0:
+        raise ValueError("Generated FEM sphere mesh has no tetrahedra. Increase mesh_resolution or sphere_surface_points.")
+    return tets
 
 
 def build_tets(config: dict, lookup: dict[tuple[int, int, int], int], res: np.ndarray) -> np.ndarray:
@@ -247,7 +257,10 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     shutil.copyfile(config_path, output_dir / "used_config.json")
 
     x, lookup, res = build_vertices(config)
-    tets = build_tets(config, lookup, res)
+    if config["shape"] == "sphere":
+        tets = build_sphere_tets(config, x)
+    else:
+        tets = build_tets(config, lookup, res)
     density = float(config["density_kg_m3"])
     tets, dm_inv, volumes, masses = prepare_tets(x, tets, density)
     rest_x = x.copy()
@@ -271,6 +284,8 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     skin = float(config["contact_skin_m"])
     y0, y1, z0, z1 = plate_span(config)
     render_every = int(config.get("render_every", 1))
+    render_backend = str(config.get("render_backend", "pyvista"))
+    particle_radius = float(config.get("particle_radius_m", 0.0010))
 
     rows = []
     rendered_frames: list[Path] = []
@@ -323,7 +338,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
 
         if not no_render and frame % render_every == 0:
             frame_path = frames_dir / f"frame_{frame:04d}.png"
-            render_frame_3d(
+            render_backend = render_frame_auto(
                 x,
                 left,
                 right,
@@ -335,6 +350,8 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
                 domain_size,
                 frame_path,
                 f"{config['scene']}  t={t:.2f}s",
+                render_backend=render_backend,
+                particle_radius_m=particle_radius,
             )
             rendered_frames.append(frame_path)
 
@@ -364,4 +381,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

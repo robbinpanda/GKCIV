@@ -37,7 +37,8 @@ def run_one(config_path: Path, frames: int | None = None, no_render: bool = Fals
         if result.returncode == 0:
             return config_path.name, True, elapsed, result.stdout.strip()
         else:
-            return config_path.name, False, elapsed, result.stderr[-500:]
+            msg = (result.stdout + "\n" + result.stderr).strip()
+            return config_path.name, False, elapsed, msg[-1200:]
     except subprocess.TimeoutExpired:
         elapsed = time.perf_counter() - start
         return config_path.name, False, elapsed, "Timeout after 3600s"
@@ -64,6 +65,8 @@ def main() -> None:
     total = len(configs)
     print(f"Found {total} configs to run")
     print(f"{'='*60}")
+    if total == 0:
+        return
 
     results = []
     total_start = time.perf_counter()
@@ -82,7 +85,7 @@ def main() -> None:
 
         bar_len = 30
         filled = int(bar_len * i / total)
-        bar = "█" * filled + "░" * (bar_len - filled)
+        bar = "#" * filled + "-" * (bar_len - filled)
         percent = i / total * 100
 
         print(f"\n[{bar}] {percent:5.1f}% ({i}/{total}){elapsed_str}")
@@ -93,10 +96,11 @@ def main() -> None:
 
         if success:
             success_count += 1
-            print(f"  ✓ SUCCESS ({elapsed:.1f}s)")
+            print(f"  OK ({elapsed:.1f}s)")
         else:
             fail_count += 1
-            print(f"  ✗ FAILED ({elapsed:.1f}s)")
+            print(f"  FAILED ({elapsed:.1f}s)")
+            print(f"  {msg}")
 
     total_elapsed = time.perf_counter() - total_start
 
@@ -105,7 +109,7 @@ def main() -> None:
     print(f"{'='*60}")
 
     for name, success, elapsed, _ in results:
-        status = "✓" if success else "✗"
+        status = "OK" if success else "FAIL"
         print(f"  {status} {name} ({elapsed:.1f}s)")
 
     print(f"\nTotal: {len(results)} configs, {success_count} success, {fail_count} failed")

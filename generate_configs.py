@@ -69,6 +69,8 @@ def make_mpm_config(scene: dict, stiff: dict, model: dict) -> dict:
         "seed": 42,
         "output_dir": f"outputs/{name}",
         "render_every": 1,
+        "render_backend": "pyvista",
+        "particle_radius_m": 0.0009,
     }
     if scene["shape"] == "sphere":
         cfg["object_diameter_m"] = scene["object_diameter_m"]
@@ -88,7 +90,8 @@ def make_fem_config(scene: dict, stiff: dict, model: dict) -> dict:
         "density_kg_m3": 1000,
         "young_modulus_pa": stiff["young_modulus_pa"],
         "poisson_ratio": 0.35,
-        "mesh_resolution": [8, 8, 8],
+        "mesh_resolution": [9, 9, 9] if scene["shape"] == "sphere" else [8, 8, 8],
+        "sphere_surface_points": 192,
         "domain_size_m": 0.1,
         "dt": 0.0001,
         "substeps_per_frame": 10,
@@ -107,6 +110,8 @@ def make_fem_config(scene: dict, stiff: dict, model: dict) -> dict:
         "seed": 42,
         "output_dir": f"outputs/{name}",
         "render_every": 1,
+        "render_backend": "pyvista",
+        "particle_radius_m": 0.0010,
     }
     if scene["shape"] == "sphere":
         cfg["object_diameter_m"] = scene["object_diameter_m"]
@@ -124,7 +129,8 @@ def make_pbd_config(scene: dict, stiff: dict) -> dict:
         "shape": scene["shape"],
         "object_center_m": scene["object_center_m"],
         "density_kg_m3": 1000,
-        "lattice_resolution": [12, 12, 12],
+        "lattice_resolution": [13, 13, 13] if scene["shape"] == "sphere" else [12, 12, 12],
+        "sphere_surface_points": 256,
         "constraint_stiffness": 0.8,
         "pbd_iterations": 5,
         "domain_size_m": 0.1,
@@ -145,6 +151,8 @@ def make_pbd_config(scene: dict, stiff: dict) -> dict:
         "seed": 42,
         "output_dir": f"outputs/{name}",
         "render_every": 1,
+        "render_backend": "pyvista",
+        "particle_radius_m": 0.0010,
     }
     if scene["shape"] == "sphere":
         cfg["object_diameter_m"] = scene["object_diameter_m"]
@@ -155,6 +163,9 @@ def make_pbd_config(scene: dict, stiff: dict) -> dict:
 
 def main() -> None:
     CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
+    for old_config in CONFIGS_DIR.glob("*.json"):
+        if old_config.name not in {"camera.json", "color_scheme.json"}:
+            old_config.unlink()
 
     count = 0
     for scene in SCENES:

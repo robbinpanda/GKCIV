@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import numpy as np
-import pyvista as pv
+
+try:
+    import pyvista as pv
+except ImportError:  # pragma: no cover - exercised only on machines without PyVista.
+    pv = None
 
 DEFAULT_CAMERA = {
     "elev": 30,
@@ -57,6 +62,9 @@ def render_frame_pyvista(
     particle_radius: float = 0.0008,
     opacity: float = 0.85,
 ) -> None:
+    if pv is None:
+        raise ImportError("PyVista is not installed")
+
     camera = camera_params or DEFAULT_CAMERA
     colors = color_scheme or DEFAULT_COLORS
 
@@ -67,21 +75,7 @@ def render_frame_pyvista(
 
     plotter = pv.Plotter(off_screen=True, window_size=resolution)
     plotter.set_background(bgcolor)
-
-    cloud = pv.PolyData(points)
-    plotter.add_mesh(
-        cloud,
-        color=body_color,
-        point_size=particle_radius * 2000,
-        render_points_as_spheres=True,
-        opacity=opacity,
-        lighting=True,
-    )
-
-    center_y = (plate_y_min + plate_y_max) * 0.5
-    height = plate_y_max - plate_y_min
-    depth = plate_z_max - plate_z_min
-    center_z = (plate_z_min + plate_z_max) * 0.5
+    plotter.enable_anti_aliasing("ssaa")
 
     left_box = pv.Box(
         bounds=[
@@ -90,7 +84,7 @@ def render_frame_pyvista(
             plate_z_min, plate_z_max,
         ]
     )
-    plotter.add_mesh(left_box, color=plate_color, opacity=0.7, lighting=True)
+    plotter.add_mesh(left_box, color=plate_color, opacity=0.32, lighting=True)
 
     right_box = pv.Box(
         bounds=[
@@ -99,17 +93,40 @@ def render_frame_pyvista(
             plate_z_min, plate_z_max,
         ]
     )
-    plotter.add_mesh(right_box, color=plate_color, opacity=0.7, lighting=True)
+    plotter.add_mesh(right_box, color=plate_color, opacity=0.32, lighting=True)
 
-    light = pv.Light(position=(domain_size, domain_size * 2, domain_size), focal_point=(0, 0, 0), intensity=1.0)
+    cloud = pv.PolyData(points)
+    if len(points) <= 2500:
+        glyph = cloud.glyph(geom=pv.Sphere(radius=particle_radius, theta_resolution=10, phi_resolution=10), scale=False, orient=False)
+        plotter.add_mesh(glyph, color=body_color, opacity=opacity, lighting=True, smooth_shading=True)
+    else:
+        plotter.add_mesh(
+            cloud,
+            color=body_color,
+            point_size=max(7.0, particle_radius * 9000),
+            render_points_as_spheres=True,
+            opacity=opacity,
+            lighting=True,
+        )
+
+    target = np.array([domain_size * 0.5, domain_size * 0.5, domain_size * 0.5], dtype=float)
+    light = pv.Light(position=(domain_size, domain_size * 2, domain_size), focal_point=target, intensity=1.0)
     plotter.add_light(light)
 
-    camera_pos = [
-        domain_size * camera.get("elev", 30) / 30,
-        domain_size * camera.get("azim", 45) / 45,
-        domain_size * 1.5,
-    ]
-    plotter.camera_position = [camera_pos, [domain_size * 0.5, domain_size * 0.5, domain_size * 0.5], [0, 1, 0]]
+    elev = math.radians(float(camera.get("elev", 30)))
+    azim = math.radians(float(camera.get("azim", 45)))
+    distance = domain_size * float(camera.get("zoom", 1.9))
+    camera_pos = target + distance * np.array(
+        [
+            math.cos(elev) * math.cos(azim),
+            math.cos(elev) * math.sin(azim),
+            math.sin(elev),
+        ],
+        dtype=float,
+    )
+    plotter.camera_position = [camera_pos.tolist(), target.tolist(), [0, 0, 1]]
+    plotter.camera.parallel_projection = True
+    plotter.camera.parallel_scale = domain_size * 0.62
 
     if title:
         plotter.add_title(title, font_size=12)

@@ -10,10 +10,11 @@
     ],
     "density_kg_m3": 1000,
     "lattice_resolution": [
-        12,
-        12,
-        12
+        13,
+        13,
+        13
     ],
+    "sphere_surface_points": 256,
     "constraint_stiffness": 0.8,
     "pbd_iterations": 5,
     "domain_size_m": 0.1,
@@ -34,5 +35,7 @@
     "seed": 42,
     "output_dir": "outputs/pbd3d_sphere_40mm_hard",
     "render_every": 1,
+    "render_backend": "pyvista",
+    "particle_radius_m": 0.001,
     "object_diameter_m": 0.04
 }

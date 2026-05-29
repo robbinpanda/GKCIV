@@ -8,10 +8,11 @@ import time
 from pathlib import Path
 
 import numpy as np
-from scipy.spatial import ConvexHull
+from scipy.spatial import ConvexHull, cKDTree
 
+from taichi_squeeze.src.geometry3d import analytical_volume, object_size, squeeze_diameter, spherical_point_cloud
 from taichi_squeeze.src.metrics import write_metrics_csv
-from taichi_squeeze.src.render3d import render_frame_3d, write_preview_gif
+from taichi_squeeze.src.render3d import render_frame_auto, write_preview_gif
 
 
 def load_config(path: Path) -> dict:
@@ -19,25 +20,8 @@ def load_config(path: Path) -> dict:
         return json.load(f)
 
 
-def object_size(config: dict) -> np.ndarray:
-    if config["shape"] == "sphere":
-        d = float(config["object_diameter_m"])
-        return np.array([d, d, d], dtype=np.float64)
-    return np.array(config["object_size_m"], dtype=np.float64)
-
-
 def object_volume(config: dict) -> float:
-    if config["shape"] == "sphere":
-        r = float(config["object_diameter_m"]) * 0.5
-        return 4.0 / 3.0 * math.pi * r**3
-    sx, sy, sz = config["object_size_m"]
-    return float(sx) * float(sy) * float(sz)
-
-
-def squeeze_diameter(config: dict) -> float:
-    if "object_diameter_m" in config:
-        return float(config["object_diameter_m"])
-    return float(config["object_size_m"][0])
+    return analytical_volume(config)
 
 
 def plate_motion(config: dict, t: float) -> tuple[float, float, float, float, float]:
@@ -98,6 +82,16 @@ def particle_geometry(points: np.ndarray) -> dict[str, float]:
 
 
 def build_lattice(config: dict) -> tuple[np.ndarray, float]:
+    if config["shape"] == "sphere":
+        points, _ = spherical_point_cloud(
+            config,
+            resolution_key="lattice_resolution",
+            surface_key="sphere_surface_points",
+            default_surface_points=256,
+        )
+        spacing = float(config["object_diameter_m"]) / max(int(np.max(config["lattice_resolution"])) - 1, 1)
+        return points.astype(np.float64), spacing
+
     center = np.array(config["object_center_m"], dtype=np.float64)
     size = object_size(config)
     res = np.array(config["lattice_resolution"], dtype=int)
@@ -112,29 +106,13 @@ def build_lattice(config: dict) -> tuple[np.ndarray, float]:
 
 
 def build_springs(points: np.ndarray, spacing: float) -> tuple[np.ndarray, np.ndarray]:
-    quantized = np.round(points / spacing).astype(int)
-    lookup = {tuple(idx): i for i, idx in enumerate(quantized)}
-    offsets = []
-    for dx in range(-1, 2):
-        for dy in range(-1, 2):
-            for dz in range(-1, 2):
-                if dx == dy == dz == 0:
-                    continue
-                if (dx, dy, dz) > (0, 0, 0):
-                    offsets.append((dx, dy, dz))
-
-    edges = []
-    rest_lengths = []
-    max_len = math.sqrt(3.0) * spacing * 1.01
-    for i, idx in enumerate(quantized):
-        for offset in offsets:
-            j = lookup.get(tuple(idx + np.array(offset)))
-            if j is None:
-                continue
-            rest = float(np.linalg.norm(points[j] - points[i]))
-            if rest <= max_len:
-                edges.append((i, j))
-                rest_lengths.append(rest)
+    tree = cKDTree(points)
+    max_len = math.sqrt(3.0) * spacing * 1.05
+    pairs = sorted(tree.query_pairs(max_len))
+    edges = np.array(pairs, dtype=np.int32)
+    if len(edges) == 0:
+        raise ValueError("Generated PBD lattice has no springs. Increase lattice_resolution.")
+    rest_lengths = np.linalg.norm(points[edges[:, 1]] - points[edges[:, 0]], axis=1)
     return np.array(edges, dtype=np.int32), np.array(rest_lengths, dtype=np.float64)
 
 
@@ -190,9 +168,14 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     edges, rest = build_springs(x, spacing)
     edge_a = edges[:, 0]
     edge_b = edges[:, 1]
+    degree = np.maximum(np.bincount(edges.reshape(-1), minlength=len(x)), 1).astype(np.float64)
     v = np.zeros_like(x)
     x0 = x.copy()
     initial = particle_geometry(x)
+    try:
+        initial_volume = float(ConvexHull(x0).volume)
+    except Exception:
+        initial_volume = object_volume(config)
 
     density = float(config["density_kg_m3"])
     total_mass = density * object_volume(config)
@@ -212,6 +195,8 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     skin = float(config["contact_skin_m"])
     y0, y1, z0, z1 = plate_span(config)
     render_every = int(config.get("render_every", 1))
+    render_backend = str(config.get("render_backend", "pyvista"))
+    particle_radius = float(config.get("particle_radius_m", max(spacing * 0.32, 0.0008)))
 
     rows = []
     rendered_frames: list[Path] = []
@@ -237,8 +222,8 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
                 safe_dist = np.maximum(dist, 1e-12)
                 correction_mag = stiffness * (dist - rest) / (inv_masses[edge_a] + inv_masses[edge_b])
                 correction = (correction_mag / safe_dist)[:, None] * delta
-                np.add.at(x, edge_a, inv_masses[edge_a, None] * correction)
-                np.add.at(x, edge_b, -inv_masses[edge_b, None] * correction)
+                np.add.at(x, edge_a, (inv_masses[edge_a] / degree[edge_a])[:, None] * correction)
+                np.add.at(x, edge_b, -(inv_masses[edge_b] / degree[edge_b])[:, None] * correction)
                 frame_force = project_plates(x, left, right, left_vel, right_vel, y0, y1, z0, z1, skin, masses, dt, frame_force)
 
             eps = 0.002
@@ -257,7 +242,6 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
         try:
             hull = ConvexHull(x)
             current_volume = hull.volume
-            initial_volume = object_volume(config)
             volume_ratio = current_volume / initial_volume if initial_volume > 0 else np.nan
         except Exception:
             volume_ratio = np.nan
@@ -290,7 +274,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
 
         if not no_render and frame % render_every == 0:
             frame_path = frames_dir / f"frame_{frame:04d}.png"
-            render_frame_3d(
+            render_backend = render_frame_auto(
                 x,
                 left,
                 right,
@@ -302,6 +286,8 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
                 domain_size,
                 frame_path,
                 f"{config['scene']}  t={t:.2f}s",
+                render_backend=render_backend,
+                particle_radius_m=particle_radius,
             )
             rendered_frames.append(frame_path)
 

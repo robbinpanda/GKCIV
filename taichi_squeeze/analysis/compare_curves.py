@@ -161,8 +161,9 @@ def compute_equivalent_stiffness(displacement: np.ndarray, force: np.ndarray) ->
 def compute_hysteresis_area(displacement: np.ndarray, force: np.ndarray, compress_time: float, release_time: float, fps: int) -> float:
     """滞回面积 A_hys: 加载-卸载围成面积"""
     compress_end = int(compress_time * fps)
-    release_start = compress_end
-    release_end = min(len(displacement), int((compress_time + release_time) * fps))
+    hold_time = 0.5
+    release_start = int((compress_time + hold_time) * fps)
+    release_end = min(len(displacement), int((compress_time + hold_time + release_time) * fps))
     
     if compress_end < 2 or release_end - release_start < 2:
         return np.nan
@@ -305,7 +306,8 @@ def run_analysis(outputs: Path, output_dir: Path | None = None, contains: str | 
     out_dir = output_dir or outputs / "analysis"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    df["normalized_compression"] = df["squeeze_disp_m"] / df.groupby("run_dir")["width_m"].transform("max")
+    initial_width = df.groupby("run_dir")["width_m"].transform("first").replace(0, np.nan)
+    df["normalized_compression"] = df["squeeze_disp_m"] / initial_width
 
     plot_lines(
         df,

@@ -1,6 +1,5 @@
 import argparse
 import json
-import math
 import os
 import shutil
 import sys
@@ -12,9 +11,9 @@ import numpy as np
 import taichi as ti
 
 from taichi_squeeze.src.constitutive import corotated_energy_density, corotated_pf_ft, neo_hookean_energy_density, neo_hookean_pf_ft
+from taichi_squeeze.src.geometry3d import analytical_volume, squeeze_diameter
 from taichi_squeeze.src.metrics import write_metrics_csv
-from taichi_squeeze.src.render3d import render_frame_3d, write_preview_gif
-from taichi_squeeze.src.render_pyvista import render_frame_pyvista, write_preview_gif_pyvista
+from taichi_squeeze.src.render3d import render_frame_auto, write_preview_gif
 
 
 def load_config(path: Path) -> dict:
@@ -91,19 +90,7 @@ def sample_particles(config: dict) -> np.ndarray:
 
 
 def estimate_volume(config: dict) -> float:
-    if config["shape"] == "sphere":
-        radius = float(config["object_diameter_m"]) * 0.5
-        return 4.0 / 3.0 * math.pi * radius**3
-    if config["shape"] == "box":
-        sx, sy, sz = config["object_size_m"]
-        return float(sx) * float(sy) * float(sz)
-    raise ValueError(f"Unsupported 3D shape: {config['shape']}")
-
-
-def squeeze_diameter(config: dict) -> float:
-    if "object_diameter_m" in config:
-        return float(config["object_diameter_m"])
-    return float(config["object_size_m"][0])
+    return analytical_volume(config)
 
 
 def plate_motion(config: dict, t: float) -> tuple[float, float, float, float, float]:
@@ -383,6 +370,8 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     dt = float(config["dt"])
     domain_size = float(config["domain_size_m"])
     render_every = int(config.get("render_every", 1))
+    render_backend = str(config.get("render_backend", "pyvista"))
+    particle_radius = float(config.get("particle_radius_m", sim.dx * 0.18))
     plate_thickness = float(config.get("plate_thickness_m", 0.006))
     plate_y_min, plate_y_max, plate_z_min, plate_z_max = plate_span(config)
     contact_skin = float(config.get("contact_skin_m", sim.dx * 0.5))
@@ -446,7 +435,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
         if not no_render and frame % render_every == 0:
             frame_path = frames_dir / f"frame_{frame:04d}.png"
             title = f"{config['scene']}  t={t:.2f}s"
-            render_frame_3d(
+            render_backend = render_frame_auto(
                 points,
                 left,
                 right,
@@ -458,6 +447,8 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
                 domain_size,
                 frame_path,
                 title,
+                render_backend=render_backend,
+                particle_radius_m=particle_radius,
             )
             rendered_frames.append(frame_path)
 
@@ -497,4 +488,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

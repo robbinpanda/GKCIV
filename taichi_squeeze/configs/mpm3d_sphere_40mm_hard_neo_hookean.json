@@ -31,5 +31,7 @@
     "seed": 42,
     "output_dir": "outputs/mpm3d_sphere_40mm_hard_neo_hookean",
     "render_every": 1,
+    "render_backend": "pyvista",
+    "particle_radius_m": 0.0009,
     "object_diameter_m": 0.04
 }

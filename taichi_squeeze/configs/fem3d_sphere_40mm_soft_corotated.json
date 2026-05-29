@@ -12,10 +12,11 @@
     "young_modulus_pa": 30000,
     "poisson_ratio": 0.35,
     "mesh_resolution": [
-        8,
-        8,
-        8
+        9,
+        9,
+        9
     ],
+    "sphere_surface_points": 192,
     "domain_size_m": 0.1,
     "dt": 0.0001,
     "substeps_per_frame": 10,
@@ -34,5 +35,7 @@
     "seed": 42,
     "output_dir": "outputs/fem3d_sphere_40mm_soft_corotated",
     "render_every": 1,
+    "render_backend": "pyvista",
+    "particle_radius_m": 0.001,
     "object_diameter_m": 0.04
 }

@@ -84,3 +84,58 @@ def write_preview_gif(frame_paths: list[Path], gif_path: Path, fps: int) -> None
     gif_path.parent.mkdir(parents=True, exist_ok=True)
     images = [imageio.imread(path) for path in frame_paths]
     imageio.mimsave(gif_path, images, duration=1.0 / fps)
+
+
+def render_frame_auto(
+    points: np.ndarray,
+    left_plate_m: float,
+    right_plate_m: float,
+    plate_thickness_m: float,
+    plate_y_min_m: float,
+    plate_y_max_m: float,
+    plate_z_min_m: float,
+    plate_z_max_m: float,
+    domain_size_m: float,
+    output_path: Path,
+    title: str,
+    render_backend: str = "pyvista",
+    particle_radius_m: float = 0.0008,
+) -> str:
+    if render_backend.lower() == "pyvista":
+        try:
+            from taichi_squeeze.src.render_pyvista import load_camera_params, load_color_scheme, render_frame_pyvista
+
+            render_frame_pyvista(
+                points,
+                left_plate_m,
+                right_plate_m,
+                plate_thickness_m,
+                plate_y_min_m,
+                plate_y_max_m,
+                plate_z_min_m,
+                plate_z_max_m,
+                domain_size_m,
+                output_path,
+                title,
+                camera_params=load_camera_params(Path("taichi_squeeze/configs/camera.json")),
+                color_scheme=load_color_scheme(Path("taichi_squeeze/configs/color_scheme.json")),
+                particle_radius=particle_radius_m,
+            )
+            return "pyvista"
+        except Exception as exc:
+            print(f"Warning: PyVista render failed ({exc}); falling back to matplotlib.")
+
+    render_frame_3d(
+        points,
+        left_plate_m,
+        right_plate_m,
+        plate_thickness_m,
+        plate_y_min_m,
+        plate_y_max_m,
+        plate_z_min_m,
+        plate_z_max_m,
+        domain_size_m,
+        output_path,
+        title,
+    )
+    return "matplotlib"
