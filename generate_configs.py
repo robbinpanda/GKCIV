@@ -81,6 +81,7 @@ def make_mpm_config(scene: dict, stiff: dict, model: dict) -> dict:
 
 def make_fem_config(scene: dict, stiff: dict, model: dict) -> dict:
     name = f"{model['solver']}_{scene['scene_id']}_{stiff['stiffness_id']}_{model['constitutive_model']}"
+    fem_substeps = 48
     cfg = {
         "solver": model["solver"],
         "constitutive_model": model["constitutive_model"],
@@ -93,8 +94,8 @@ def make_fem_config(scene: dict, stiff: dict, model: dict) -> dict:
         "mesh_resolution": [9, 9, 9] if scene["shape"] == "sphere" else [8, 8, 8],
         "sphere_surface_points": 192,
         "domain_size_m": 0.1,
-        "dt": 0.0001,
-        "substeps_per_frame": 10,
+        "dt": round(1.0 / 60.0 / fem_substeps, 10),
+        "substeps_per_frame": fem_substeps,
         "fps": 60,
         "max_frames": 390,
         "initial_gap_ratio": 1.05,
@@ -104,7 +105,9 @@ def make_fem_config(scene: dict, stiff: dict, model: dict) -> dict:
         "release_time_s": 1.0,
         "plate_thickness_m": 0.006,
         "contact_skin_m": 0.001,
-        "velocity_damping": 0.0,
+        "velocity_damping": 3.0,
+        "max_velocity_m_s": 2.0,
+        "max_tet_condition": 120.0,
         "gravity_m_s2": 0.0,
         "arch": "cpu",
         "seed": 42,

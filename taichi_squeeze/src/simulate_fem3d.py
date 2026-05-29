@@ -154,7 +154,7 @@ def build_tets(config: dict, lookup: dict[tuple[int, int, int], int], res: np.nd
     return np.array(tets, dtype=np.int32)
 
 
-def prepare_tets(rest_x: np.ndarray, tets: np.ndarray, density: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def prepare_tets(rest_x: np.ndarray, tets: np.ndarray, density: float, max_condition: float = 120.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     dm_inv = []
     volumes = []
     masses = np.zeros(len(rest_x), dtype=np.float64)
@@ -166,13 +166,26 @@ def prepare_tets(rest_x: np.ndarray, tets: np.ndarray, density: float) -> tuple[
         volume = abs(det) / 6.0
         if volume <= 1e-12:
             continue
+        if not np.isfinite(dm).all() or np.linalg.cond(dm) > max_condition:
+            continue
         valid_tets.append(tet)
         dm_inv.append(np.linalg.inv(dm))
         volumes.append(volume)
         for idx in tet:
             masses[idx] += density * volume / 4.0
+    if not volumes:
+        raise ValueError("Generated FEM mesh has no valid tetrahedra after quality filtering.")
     masses[masses <= 0.0] = density * np.mean(volumes) / 4.0
     return np.array(valid_tets, dtype=np.int32), np.array(dm_inv), np.array(volumes), masses
+
+
+def clip_velocity(v: np.ndarray, max_velocity: float) -> None:
+    if max_velocity <= 0.0:
+        return
+    speed = np.linalg.norm(v, axis=1)
+    mask = speed > max_velocity
+    if np.any(mask):
+        v[mask] *= (max_velocity / speed[mask])[:, None]
 
 
 def compute_forces(x: np.ndarray, tets: np.ndarray, dm_inv: np.ndarray, volumes: np.ndarray, mu: float, la: float, constitutive_model: str = "corotated") -> tuple[np.ndarray, float, float]:
@@ -262,7 +275,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     else:
         tets = build_tets(config, lookup, res)
     density = float(config["density_kg_m3"])
-    tets, dm_inv, volumes, masses = prepare_tets(x, tets, density)
+    tets, dm_inv, volumes, masses = prepare_tets(x, tets, density, float(config.get("max_tet_condition", 120.0)))
     rest_x = x.copy()
     v = np.zeros_like(x)
     initial = particle_geometry(x)
@@ -278,6 +291,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     substeps = int(config["substeps_per_frame"])
     dt = float(config["dt"])
     damping = float(config.get("velocity_damping", 0.0))
+    max_velocity = float(config.get("max_velocity_m_s", 0.0))
     gravity = np.array([0.0, float(config.get("gravity_m_s2", 0.0)), 0.0], dtype=np.float64)
     domain_size = float(config["domain_size_m"])
     plate_thickness = float(config["plate_thickness_m"])
@@ -304,6 +318,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
             forces, elastic, mean_j = compute_forces(x, tets, dm_inv, volumes, mu, la, constitutive_model)
             v += (forces / masses[:, None] + gravity) * dt
             v *= max(0.0, 1.0 - damping * dt)
+            clip_velocity(v, max_velocity)
             x += v * dt
             eps = 0.002
             x[:] = np.clip(x, eps, domain_size - eps)
