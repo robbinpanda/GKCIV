@@ -112,7 +112,7 @@ Final_Project_GKCIV/
 | 场景 ID | 几何体 | 尺寸 | 用途 |
 |---|---|---|---|
 | `sphere_40mm` | 球体 | 直径 0.04 m | 最简单，力学曲线最干净 |
-| `cube_50mm` | 圆角立方体 | 0.05×0.05×0.05 m | 更接近真实捏捏，观察边角褶皱 |
+| `cube_40mm` | 立方体 | 0.04×0.04×0.04 m | 与 40 mm 球体使用相同夹板行程，观察边角变形 |
 
 ### 3.2 统一材料参数（两档刚度）
 
@@ -131,12 +131,14 @@ Final_Project_GKCIV/
 
 | 阶段 | 时间区间 | 动作 |
 |---|---|---|
-| 压缩 | 0.0 – 1.0 s | 匀速压缩至原始直径的 70% |
+| 压缩 | 0.0 – 1.0 s | 匀速压缩至原始直径的 50% |
 | 保持 | 1.0 – 1.5 s | 保持最大压缩 |
 | 释放 | 1.5 – 2.5 s | 匀速释放 |
 | 恢复 | 2.5 – 6.5 s | 自由回弹 |
 | 初始间距 | 物体直径 × 1.05 | |
-| 最小间距 | 物体直径 × 0.70 | |
+| 最小间距 | 物体直径 × 0.50 | |
+
+接触容差必须小于初始单侧余隙；当前推荐 `contact_skin_m = 0.00025`，40 mm 物体初始板面间距为 42 mm，考虑两侧 skin 后仍保留约 0.75 mm 单侧有效余隙。
 
 ### 3.4 统一导出标准
 
@@ -228,7 +230,7 @@ python -m taichi_squeeze.src.simulate_fem3d --config taichi_squeeze/configs/sphe
 示例：
 - `mpm3d_sphere_40mm_soft.json`
 - `mpm3d_sphere_40mm_hard.json`
-- `fem3d_cube_50mm_soft.json`
+- `fem3d_cube_40mm_soft.json`
 - `pbd3d_sphere_40mm_soft.json`
 
 **每个配置必须包含**：

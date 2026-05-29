@@ -1,8 +1,8 @@
 {
     "solver": "mpm3d",
     "constitutive_model": "corotated",
-    "scene": "mpm3d_sphere_40mm_soft_corotated",
-    "shape": "sphere",
+    "scene": "mpm3d_cube_40mm_soft_corotated",
+    "shape": "box",
     "object_center_m": [
         0.05,
         0.05,
@@ -30,9 +30,13 @@
     "gravity_m_s2": 0.0,
     "arch": "cpu",
     "seed": 42,
-    "output_dir": "outputs/mpm3d_sphere_40mm_soft_corotated",
+    "output_dir": "outputs/mpm3d_cube_40mm_soft_corotated",
     "render_every": 1,
     "render_backend": "matplotlib",
     "particle_radius_m": 0.0009,
-    "object_diameter_m": 0.04
+    "object_size_m": [
+        0.04,
+        0.04,
+        0.04
+    ]
 }

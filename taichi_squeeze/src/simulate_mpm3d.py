@@ -206,6 +206,7 @@ class MPM3DSimulator:
         plate_z_min: ti.f32,
         plate_z_max: ti.f32,
         contact_skin: ti.f32,
+        grid_contact_margin: ti.f32,
     ):
         for i, j, k in self.grid_m:
             self.grid_v[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
@@ -271,11 +272,11 @@ class MPM3DSimulator:
                     and node_pos[2] >= plate_z_min
                     and node_pos[2] <= plate_z_max
                 )
-                if in_plate and node_pos[0] < left_plate and velocity[0] < left_vel:
+                if in_plate and node_pos[0] < left_plate - grid_contact_margin and velocity[0] < left_vel:
                     impulse = mass * (left_vel - velocity[0])
                     velocity[0] = left_vel
                     ti.atomic_add(self.contact_force[None], ti.abs(impulse) / self.dt)
-                if in_plate and node_pos[0] > right_plate and velocity[0] > right_vel:
+                if in_plate and node_pos[0] > right_plate + grid_contact_margin and velocity[0] > right_vel:
                     impulse = mass * (right_vel - velocity[0])
                     velocity[0] = right_vel
                     ti.atomic_add(self.contact_force[None], ti.abs(impulse) / self.dt)
@@ -375,6 +376,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
     plate_thickness = float(config.get("plate_thickness_m", 0.006))
     plate_y_min, plate_y_max, plate_z_min, plate_z_max = plate_span(config)
     contact_skin = float(config.get("contact_skin_m", sim.dx * 0.5))
+    grid_contact_margin = max(contact_skin, float(config.get("grid_contact_margin_cells", 0.5)) * sim.dx)
 
     rows = []
     rendered_frames: list[Path] = []
@@ -398,6 +400,7 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
                 plate_z_min,
                 plate_z_max,
                 contact_skin,
+                grid_contact_margin,
             )
             frame_force += float(sim.contact_force[None])
 

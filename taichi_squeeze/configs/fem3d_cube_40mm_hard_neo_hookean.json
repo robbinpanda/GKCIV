@@ -1,7 +1,7 @@
 {
     "solver": "fem3d",
     "constitutive_model": "neo_hookean",
-    "scene": "fem3d_cube_50mm_hard_neo_hookean",
+    "scene": "fem3d_cube_40mm_hard_neo_hookean",
     "shape": "box",
     "object_center_m": [
         0.05,
@@ -23,12 +23,12 @@
     "fps": 60,
     "max_frames": 390,
     "initial_gap_ratio": 1.05,
-    "min_gap_ratio": 0.7,
+    "min_gap_ratio": 0.5,
     "compress_time_s": 1.0,
     "hold_time_s": 0.5,
     "release_time_s": 1.0,
     "plate_thickness_m": 0.006,
-    "contact_skin_m": 0.001,
+    "contact_skin_m": 0.00025,
     "velocity_damping": 3.0,
     "max_velocity_m_s": 2.0,
     "max_tet_condition": 120.0,
@@ -37,13 +37,13 @@
     "gravity_m_s2": 0.0,
     "arch": "cpu",
     "seed": 42,
-    "output_dir": "outputs/fem3d_cube_50mm_hard_neo_hookean",
+    "output_dir": "outputs/fem3d_cube_40mm_hard_neo_hookean",
     "render_every": 1,
     "render_backend": "matplotlib",
     "particle_radius_m": 0.001,
     "object_size_m": [
-        0.05,
-        0.05,
-        0.05
+        0.04,
+        0.04,
+        0.04
     ]
 }
