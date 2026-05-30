@@ -158,7 +158,7 @@ class MPM3DSimulator:
         self.inv_dx = 1.0 / self.dx
         self.dt = float(config["dt"])
         self.gravity = float(config.get("gravity_m_s2", 0.0))
-        self.grid_damping = float(config.get("grid_velocity_damping", 0.0))
+        self.grid_damping = float(config.get("grid_velocity_damping", config.get("velocity_damping", 0.0)))
 
         volume = estimate_volume(config)
         density = float(config["density_kg_m3"])

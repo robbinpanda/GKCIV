@@ -70,7 +70,7 @@ def make_mpm_config(scene: dict, stiff: dict, model: dict) -> dict:
         "plate_thickness_m": 0.006,
         "contact_skin_m": 0.00025,
         "grid_contact_margin_cells": 0.5,
-        "velocity_damping": 0.0,
+        "grid_velocity_damping": 0.0,
         "gravity_m_s2": 0.0,
         "arch": "cpu",
         "seed": 42,
