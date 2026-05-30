@@ -12,11 +12,33 @@ import pandas as pd
 
 
 STYLE_BY_SOLVER = {
-    "mpm": {"color": "#2563eb", "label": "MPM", "marker": "o"},
-    "mpm3d": {"color": "#2563eb", "label": "MPM", "marker": "o"},
-    "pbd3d": {"color": "#16a34a", "label": "PBD", "marker": "s"},
-    "fem3d": {"color": "#dc2626", "label": "FEM", "marker": "^"},
+    "mpm": {"color": "#2563eb", "marker": "o"},
+    "mpm3d": {"color": "#2563eb", "marker": "o"},
+    "pbd3d": {"color": "#16a34a", "marker": "s"},
+    "fem3d": {"color": "#dc2626", "marker": "^"},
 }
+
+
+def label_from_run_dir(run_dir: str) -> str:
+    parts = run_dir.split("_")
+    solver = parts[0].replace("3d", "").upper() if parts else run_dir
+    shape = "cube" if "cube" in parts else "sphere" if "sphere" in parts else ""
+    material = "soft" if "soft" in parts else "hard" if "hard" in parts else ""
+    if "neo" in parts and "hookean" in parts:
+        model = "NH"
+    elif "corotated" in parts:
+        model = "CR"
+    else:
+        model = ""
+    return " ".join(part for part in [solver, shape, material, model] if part)
+
+
+def linestyle_from_run_dir(run_dir: str) -> str:
+    if "neo_hookean" in run_dir:
+        return "--"
+    if "corotated" in run_dir:
+        return "-"
+    return ":"
 
 
 def find_metric_files(outputs: Path, contains: str | None = None) -> list[Path]:
@@ -41,9 +63,10 @@ def style_for_group(group: pd.DataFrame, fallback_label: str) -> dict:
     solver = str(group["solver"].iloc[0]).lower()
     style = STYLE_BY_SOLVER.get(solver, {})
     return {
-        "label": style.get("label", fallback_label.replace("taichi_", "").replace("_", " ")),
+        "label": label_from_run_dir(fallback_label),
         "color": style.get("color", None),
         "marker": style.get("marker", "o"),
+        "linestyle": linestyle_from_run_dir(fallback_label),
     }
 
 
@@ -63,6 +86,7 @@ def plot_lines(df: pd.DataFrame, x: str, y: str, out: Path, xlabel: str, ylabel:
             values[mask],
             label=style["label"],
             color=style["color"],
+            linestyle=style["linestyle"],
             linewidth=2.8,
             marker=style["marker"],
             markersize=4.0,
@@ -100,6 +124,7 @@ def plot_hysteresis(df: pd.DataFrame, out: Path) -> None:
             force[mask],
             label=style["label"],
             color=style["color"],
+            linestyle=style["linestyle"],
             linewidth=2.0,
             alpha=0.85,
         )
@@ -129,7 +154,7 @@ def plot_energy(df: pd.DataFrame, out: Path) -> None:
         elastic = pd.to_numeric(group["elastic_energy"], errors="coerce").values
         total = kinetic + elastic
         style = style_for_group(group, label)
-        ax.plot(t, total, label=style["label"], color=style["color"], linewidth=2.0, alpha=0.85)
+        ax.plot(t, total, label=style["label"], color=style["color"], linestyle=style["linestyle"], linewidth=2.0, alpha=0.85)
         plotted += 1
     ax.set_xlabel("time (s)")
     ax.set_ylabel("total energy (J)")
