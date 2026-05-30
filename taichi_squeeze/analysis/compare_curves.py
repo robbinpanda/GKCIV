@@ -203,21 +203,21 @@ def compute_hysteresis_area(displacement: np.ndarray, force: np.ndarray, compres
     return float(abs(area_load - area_unload))
 
 
-def compute_recovery_time(height: np.ndarray, time: np.ndarray, release_time: float, fps: int) -> float:
-    """恢复时间 T_95: 释放后高度回到 95% 初始高度的时间"""
-    release_start_idx = int(release_time * fps)
-    if release_start_idx >= len(height):
+def compute_recovery_time(width: np.ndarray, time: np.ndarray, release_start_s: float, fps: int) -> float:
+    """恢复时间 T_95: 释放后挤压方向宽度回到 95% 初始宽度的时间"""
+    release_start_idx = int(release_start_s * fps)
+    if release_start_idx >= len(width):
         return np.nan
     
-    initial_height = height[0]
-    target_height = initial_height * 0.95
+    initial_width = width[0]
+    target_width = initial_width * 0.95
     
-    release_height = height[release_start_idx:]
+    release_width = width[release_start_idx:]
     release_t = time[release_start_idx:]
     
-    for i, h in enumerate(release_height):
-        if h >= target_height:
-            return float(release_t[i] - release_time)
+    for i, w in enumerate(release_width):
+        if w >= target_width:
+            return float(release_t[i] - release_start_s)
     return np.nan
 
 
@@ -254,7 +254,7 @@ def compute_advanced_metrics(group: pd.DataFrame) -> dict:
     """计算单个实验组的高级指标"""
     displacement = pd.to_numeric(group["squeeze_disp_m"], errors="coerce").values
     force = pd.to_numeric(group["plate_force_n"], errors="coerce").values
-    height = pd.to_numeric(group["height_m"], errors="coerce").values
+    width = pd.to_numeric(group["width_m"], errors="coerce").values
     time_vals = pd.to_numeric(group["t"], errors="coerce").values
     kinetic = pd.to_numeric(group["kinetic_energy"], errors="coerce").values
     elastic = pd.to_numeric(group["elastic_energy"], errors="coerce").values
@@ -267,7 +267,7 @@ def compute_advanced_metrics(group: pd.DataFrame) -> dict:
     
     k_eq = compute_equivalent_stiffness(displacement, force)
     a_hys = compute_hysteresis_area(displacement, force, compress_time, release_time, fps)
-    t_95 = compute_recovery_time(height, time_vals, compress_time + hold_time, fps)
+    t_95 = compute_recovery_time(width, time_vals, compress_time + hold_time, fps)
     delta_e = compute_energy_drift(kinetic, elastic)
     sigma_f = compute_contact_force_jitter(force, compress_time, compress_time + hold_time, fps)
     vol_mean, vol_var = compute_volume_ratio_stats(volume_ratio)
