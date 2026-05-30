@@ -1,50 +1,59 @@
-# Blender 捏捏仿真高质量视频执行计划
+# Taichi + Blender 捏捏仿真视频执行计划
 
 生成日期：2026-05-30
 
-## 0. 目标重定义
+## 0. 目标
 
-本计划的目标不是再做一版科研分析图，而是制作一个 **视觉效果优先的 Blender 捏捏仿真成片**：
+这一阶段不再继续改上一阶段的 `taichi_squeeze/` 实验代码，也不删除或重跑根目录 `outputs/`。
 
-- 看起来像真实柔软的“捏捏”玩具。
-- 模型、材质、灯光、镜头、动画节奏都要好看。
-- 物理运动来自 Taichi 的 MPM 仿真，保证不是手工乱做。
-- Blender 负责最终 3D 模型重建、材质、灯光、镜头和视频渲染。
+新目标是单独做一个视觉优先的 Blender 成片流水线：
 
-参考风格：
+- 物理运动来自上一阶段效果最稳定的 Taichi MPM 软体仿真。
+- Blender 负责连续表面、材质、透明夹板、灯光、相机和最终视频。
+- 所有新代码和新输出都隔离在 `taichi_blender_squeeze/`。
+- 先做 5 张关键帧预览，确认好看后再做完整视频。
 
-- 用户提供的 B 站参考视频：
-  - `https://www.bilibili.com/video/BV1Fc411x7xy/`
-  - `https://www.bilibili.com/video/BV1W7fmBpEKL/`
-- 预期观感：软糯、Q 弹、半写实、产品展示感强，而不是 Matplotlib/科研图风格。
+## 1. 参考项目
 
-## 1. 技术路线总览
+参考用户给出的两个 B 站开源仓库：
 
-最终采用：
+- `Tbl0x7D6/ACG-Project`: <https://github.com/Tbl0x7D6/ACG-Project>
+- `jason-huang03/SPH_Project`: <https://github.com/jason-huang03/SPH_Project>
 
-```text
-Taichi MPM 仿真 -> 导出逐帧粒子/夹板数据 -> 重建连续软体表面 -> Blender 高质量渲染
-```
+从它们借鉴的不是具体代码，而是工程结构：
 
-分工如下：
-
-| 模块 | 作用 |
+| 参考点 | 本项目对应做法 |
 |---|---|
-| Taichi | 负责 MPM 软体运动、压缩/释放、夹板轨迹 |
-| Python 后处理 | 粒子云转连续表面网格，导出 mesh sequence |
-| Blender | 创建好看的捏捏模型、夹板、场景、灯光、相机、材质、视频 |
+| simulation 和 render 分离 | Taichi 只导出几何，Blender 只做视觉 |
+| mesh/particle 中间结果 | 先导出 particle NPZ，再重建 PLY mesh sequence |
+| Blender 脚本化渲染 | 用 `blender/create_squishy_scene.py` 自动建场景 |
+| 先预览再成片 | 先渲染关键帧，满意后再完整渲染 |
+| 资产目录独立 | HDRI、贴图、模型放 `taichi_blender_squeeze/assets/` |
 
-Blender 不作为物理求解器使用。它只接收 Taichi 输出的形变几何，并把它渲染得更真实、更漂亮。
-
-## 2. 选用哪一组 Taichi 仿真
-
-主方案使用：
+## 2. 当前新目录结构
 
 ```text
-mpm3d_cube_40mm_soft_corotated
+taichi_blender_squeeze/
+  __init__.py
+  README.md
+  references.md
+  export_mpm_geometry.py
+  reconstruct_surface.py
+  assets/
+    README.md
+  blender/
+    create_squishy_scene.py
+    render_blender_video.py
+  configs/
+    blender_config.example.json
+  outputs/                  # 运行后生成，已在本目录 .gitignore 中忽略
 ```
 
-对应配置：
+这个结构与上一阶段隔离：不需要修改 `taichi_squeeze/src/simulate_mpm3d.py`，也不会把 Blender 产物写到根目录 `outputs/`。
+
+## 3. 选用的仿真组
+
+默认使用：
 
 ```text
 taichi_squeeze/configs/mpm3d_cube_40mm_soft_corotated.json
@@ -54,353 +63,160 @@ taichi_squeeze/configs/mpm3d_cube_40mm_soft_corotated.json
 
 | 项目 | 说明 |
 |---|---|
-| MPM | 体积保持最稳定，适合做连续软体视觉展示 |
-| soft | 软材质变形更明显，更像捏捏玩具 |
-| corotated | 当前结果稳定，与 Neo-Hookean 差异很小 |
-| cube_40mm | 立方体被挤压时轮廓变化明显，比球体更容易看出“捏”的动作 |
-| 无穿透 | 当前结果中夹板穿透为 0，适合做干净视频 |
+| MPM | 软体连续形变最稳定，适合转成表面 mesh |
+| cube_40mm | 捏压效果比球更明显，更接近“捏捏玩具”展示 |
+| soft | 变形足够明显 |
+| corotated | 当前实验中稳定且无明显穿透 |
+| 50% 压缩 | 视觉效果比 70% 更强，已经在上一阶段计划中修正 |
 
-备选方案：
-
-```text
-mpm3d_sphere_40mm_soft_corotated
-```
-
-球体更像水球/果冻，但压缩视觉变化弱一些。建议第一版主视频用 cube，第二版补 sphere 作为对照镜头。
-
-## 3. 当前环境检查
-
-当前命令行中没有检测到 `blender`：
-
-```powershell
-blender --version
-```
-
-返回：
+备选镜头：
 
 ```text
-blender : 无法将“blender”项识别为 cmdlet...
+taichi_squeeze/configs/mpm3d_sphere_40mm_soft_corotated.json
 ```
 
-因此第一步需要完成以下任一项：
+球可以作为第二镜头或对照镜头，但主成片建议先用 cube。
 
-1. 安装 Blender，并把 `blender.exe` 加入 PATH。
-2. 或在脚本/配置中写明 Blender 绝对路径，例如：
+## 4. 执行流水线
+
+### Step 1: 导出 MPM 粒子和夹板轨迹
+
+关键帧预览：
 
 ```powershell
-"C:\Program Files\Blender Foundation\Blender 4.3\blender.exe"
-```
-
-建议使用 Blender 4.x。优先使用 Eevee Next 做快速预览，最终镜头可以使用 Cycles。
-
-## 4. 视觉目标
-
-### 4.1 软体外观
-
-软体应该像一个柔软的硅胶/橡胶捏捏玩具：
-
-| 项目 | 建议 |
-|---|---|
-| 颜色 | 糖果蓝、奶油粉、半透明果冻蓝三选一 |
-| 材质 | 半哑光橡胶或轻微半透明硅胶 |
-| 粗糙度 | 0.45-0.65 |
-| 次表面散射 | 轻微开启，增强软糯感 |
-| 表面 | 连续光滑，不显示粒子点 |
-| 轮廓 | 保留圆润边缘和压缩后的鼓胀感 |
-
-### 4.2 夹板外观
-
-夹板不再用科研图里的灰色矩形，而要做成高质量透明亚克力压板：
-
-| 项目 | 建议 |
-|---|---|
-| 材质 | 半透明磨砂亚克力 / 透明玻璃 |
-| 颜色 | 淡粉或淡灰 |
-| 边缘 | 加厚倒角，边缘高光明显 |
-| 透明度 | 0.25-0.45 |
-| 作用 | 既能看出挤压，又不遮挡软体 |
-
-### 4.3 场景外观
-
-| 项目 | 建议 |
-|---|---|
-| 地面 | 浅灰或暖白 matte plane |
-| 背景 | 干净棚拍背景，避免科研坐标轴 |
-| 灯光 | 大面积 softbox 主光 + 弱补光 + 轮廓光 |
-| 相机 | 低角度 3/4 产品镜头 |
-| 焦距 | 70-100 mm，减少透视畸变 |
-| 景深 | 轻微 DOF，焦点在软体中心 |
-
-## 5. 动画目标
-
-最终视频建议 8-12 秒，节奏比原始 6.5 秒实验稍微更“展示化”：
-
-| 时间段 | 内容 |
-|---|---|
-| 0-1 s | 初始状态，夹板靠近但不接触，给观众看清模型 |
-| 1-3 s | 缓慢压缩到最大形变 |
-| 3-4 s | 保持最大压缩，强调鼓胀和软糯 |
-| 4-6 s | 释放回弹 |
-| 6-8 s | 轻微余振或停留 hero frame |
-
-可以从 390 帧 Taichi 结果中重映射时间，而不一定按原始 60 fps 原速播放。
-
-推荐最终输出：
-
-| 项目 | 建议 |
-|---|---|
-| 分辨率 | 1920 × 1080 |
-| 帧率 | 30 fps |
-| 时长 | 8-12 s |
-| 格式 | H.264 MP4 |
-| 另存 | 5 张关键帧 PNG |
-
-## 6. 关键技术步骤
-
-### Step 0：确认 Blender 可执行文件
-
-新增配置文件：
-
-```text
-blender/blender_config.json
-```
-
-内容示例：
-
-```json
-{
-  "blender_exe": "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe",
-  "render_engine": "CYCLES",
-  "resolution": [1920, 1080],
-  "fps": 30
-}
-```
-
-### Step 1：给 MPM 增加几何导出
-
-给 `simulate_mpm3d.py` 增加参数：
-
-```powershell
-python -m taichi_squeeze.src.simulate_mpm3d `
+python -m taichi_blender_squeeze.export_mpm_geometry `
   --config taichi_squeeze/configs/mpm3d_cube_40mm_soft_corotated.json `
-  --export-geometry `
-  --no-render
+  --keyframes 0,60,90,150,389
 ```
 
 输出：
 
 ```text
-outputs/mpm3d_cube_40mm_soft_corotated/
-  geometry/
-    particles_0000.npz
-    particles_0001.npz
-    ...
-    plates.csv
+taichi_blender_squeeze/outputs/geometry/mpm3d_cube_40mm_soft_corotated/
+  particles_0000.npz
+  particles_0060.npz
+  particles_0090.npz
+  particles_0150.npz
+  particles_0389.npz
+  plates.csv
+  metrics.csv
+  used_config.json
+  export_config.json
 ```
 
-每帧 `particles_XXXX.npz`：
+完整视频时把 `--keyframes` 换成 `--frame-stride 1` 或 `--frame-stride 2`。
 
-```text
-positions: float32[N, 3]
-```
+### Step 2: 粒子云重建连续表面
 
-`plates.csv`：
-
-```text
-frame,t,left_plate,right_plate,plate_y_min,plate_y_max,plate_z_min,plate_z_max
-```
-
-### Step 2：粒子云重建为连续软体表面
-
-新增脚本：
-
-```text
-taichi_squeeze/tools/export_blender_mesh_sequence.py
-```
-
-输入：
-
-```text
-outputs/mpm3d_cube_40mm_soft_corotated/geometry/
+```powershell
+python -m taichi_blender_squeeze.reconstruct_surface `
+  --input taichi_blender_squeeze/outputs/geometry/mpm3d_cube_40mm_soft_corotated `
+  --output taichi_blender_squeeze/outputs/meshes/mpm3d_cube_40mm_soft_corotated_keyframes `
+  --resolution 96
 ```
 
 输出：
 
 ```text
-outputs/blender/mpm_cube_soft_corotated_mesh/
+taichi_blender_squeeze/outputs/meshes/mpm3d_cube_40mm_soft_corotated_keyframes/
   mesh_0000.ply
-  mesh_0001.ply
-  ...
+  mesh_0060.ply
+  mesh_0090.ply
+  mesh_0150.ply
+  mesh_0389.ply
   plates.json
+  reconstruction_config.json
 ```
 
-推荐方法：
+当前实现使用密度场 + Marching Cubes，优先保证能在本地 Python 环境完成。后续如果追求更高质量，可以替换为 SplashSurf 或 Blender 内部 remesh/geometry nodes。
 
-1. 读取 MPM 粒子。
-2. 构建体素密度场。
-3. 使用 Marching Cubes 提取表面。
-4. 使用 Taubin 或 Laplacian 平滑。
-5. 导出 `.ply` 或 `.obj` 网格序列。
+注意坐标系：Taichi 中 `y` 是高度，Blender 中 `z` 是高度。当前 PLY 导出和夹板场景脚本统一使用 `Taichi (x,y,z) -> Blender (x,z,y)`，避免相机和地面方向错位导致“物体浮在板子上方”的观感。
 
-推荐参数：
+### Step 3: Blender 自动建场景
 
-| 项目 | 起点 |
+本地当前没有检测到可用 `blender` 命令，所以此步代码已写好，但未运行。
+
+安装 Blender 并加入 PATH 后：
+
+```powershell
+blender -b --python taichi_blender_squeeze/blender/create_squishy_scene.py -- `
+  --mesh-dir taichi_blender_squeeze/outputs/meshes/mpm3d_cube_40mm_soft_corotated_keyframes `
+  --plates-json taichi_blender_squeeze/outputs/meshes/mpm3d_cube_40mm_soft_corotated_keyframes/plates.json `
+  --output-blend taichi_blender_squeeze/outputs/blender/scene/squishy_mpm_cube.blend `
+  --render-keyframes
+```
+
+脚本会创建：
+
+- 半透明蓝色橡胶/硅胶软体材质。
+- 透明磨砂亚克力夹板。
+- 低角度 3/4 产品镜头。
+- 大面积柔光主灯和轮廓光。
+- matte studio floor。
+- mesh sequence 可见性关键帧。
+- 夹板位移动画。
+
+### Step 4: 完整视频渲染
+
+关键帧好看后再完整输出：
+
+```powershell
+python -m taichi_blender_squeeze.export_mpm_geometry `
+  --config taichi_squeeze/configs/mpm3d_cube_40mm_soft_corotated.json `
+  --frame-stride 1
+
+python -m taichi_blender_squeeze.reconstruct_surface `
+  --input taichi_blender_squeeze/outputs/geometry/mpm3d_cube_40mm_soft_corotated `
+  --output taichi_blender_squeeze/outputs/meshes/mpm3d_cube_40mm_soft_corotated_full `
+  --resolution 96
+```
+
+然后用 Blender 创建完整场景：
+
+```powershell
+blender -b --python taichi_blender_squeeze/blender/create_squishy_scene.py -- `
+  --mesh-dir taichi_blender_squeeze/outputs/meshes/mpm3d_cube_40mm_soft_corotated_full `
+  --plates-json taichi_blender_squeeze/outputs/meshes/mpm3d_cube_40mm_soft_corotated_full/plates.json `
+  --output-blend taichi_blender_squeeze/outputs/blender/scene/squishy_mpm_cube.blend
+```
+
+渲染视频：
+
+```powershell
+python -m taichi_blender_squeeze.blender.render_blender_video `
+  --config taichi_blender_squeeze/configs/blender_config.example.json `
+  --blend taichi_blender_squeeze/outputs/blender/scene/squishy_mpm_cube.blend
+```
+
+## 5. 视觉验收标准
+
+关键帧需要满足：
+
+- 第 0 帧夹板靠近但不接触软体。
+- 最大压缩帧明显显示 50% 压缩。
+- 软体是连续光滑表面，不是粒子点云。
+- 夹板透明但不遮挡主体形变。
+- 相机能看清左右夹板和软体之间的关系。
+- 整体观感接近产品级捏捏玩具渲染，而不是 Matplotlib 科研图。
+
+## 6. 当前缺少的东西
+
+| 缺项 | 影响 |
 |---|---|
-| 体素分辨率 | 96³ |
-| 粒子核半径 | 2.0 × 粒子平均间距 |
-| 表面阈值 | 先自动估计，再人工微调 |
-| 平滑 | 2 次 |
-| 导出帧率 | 30 fps，可从原始 60 fps 隔帧 |
+| Blender 可执行文件 | 无法在本地实际渲染 `.blend`、PNG 或 MP4 |
+| 可选 HDRI/贴图/模型资产 | 当前可用程序化灯光和材质，但真实感上限不如精调资产 |
+| 参考仓库资产许可确认 | 不能直接复制第三方 HDRI、模型、贴图进本仓库，除非确认 license 和 attribution |
+| 关键帧人工审美调参 | 首次 Blender 渲染后还要微调相机、材质、灯光、surface 阈值 |
 
-### Step 3：制作 Blender 场景脚本
+## 7. 不建议的改动
 
-新增脚本：
+- 不建议用 Blender soft body 重新仿真，因为会和 Taichi 实验结果脱钩。
+- 不建议把新代码塞回 `taichi_squeeze/`，否则会污染上一阶段已经验证过的实验。
+- 不建议第一次就渲染完整视频，先看关键帧能节省大量时间。
 
-```text
-blender/create_squishy_scene.py
-```
+## 8. 下一步
 
-职责：
-
-- 清空默认场景。
-- 导入 mesh sequence。
-- 创建透明亚克力夹板，并按 `plates.json` 设置逐帧位置。
-- 创建软体材质。
-- 创建地面、背景、灯光和相机。
-- 输出 `.blend` 文件。
-
-输出：
-
-```text
-outputs/blender/scene/squishy_mpm_cube.blend
-```
-
-### Step 4：关键帧预览
-
-先只渲染 5 张关键帧，不直接渲完整视频：
-
-| 帧 | 含义 |
-|---:|---|
-| 0 | 初始未接触 |
-| 60 | 最大压缩 |
-| 90 | 保持结束 |
-| 150 | 释放结束 |
-| 389 | 最终恢复 |
-
-输出：
-
-```text
-outputs/blender/preview_keyframes/
-  key_0000.png
-  key_0060.png
-  key_0090.png
-  key_0150.png
-  key_0389.png
-```
-
-验收标准：
-
-1. 初始帧夹板没有接触软体。
-2. 最大压缩帧形变明显。
-3. 软体表面连续光滑，不显示粒子颗粒。
-4. 夹板透明但不遮挡主体。
-5. 相机角度能看清两块板和软体间距。
-
-### Step 5：渲染完整视频
-
-命令形式：
-
-```powershell
-blender -b outputs/blender/scene/squishy_mpm_cube.blend -o outputs/blender/final/frame_#### -F PNG -a
-```
-
-或用脚本：
-
-```powershell
-python blender/render_blender_video.py
-```
-
-最终输出：
-
-```text
-outputs/blender/final/
-  frame_0001.png
-  frame_0002.png
-  ...
-  squishy_mpm_cube_blender.mp4
-```
-
-## 7. 不建议的方向
-
-### 7.1 不建议直接用 Blender soft body 重新模拟
-
-原因：
-
-- 与 Taichi 实验不再同源。
-- 参数不可比。
-- 很难保证与 metrics 对应。
-- 可能好看，但会削弱“仿真引擎实验”的可信度。
-
-如果使用 Blender 内置 soft body，只能作为视觉参考，不作为实验结果。
-
-### 7.2 不建议继续用粒子点渲染作为最终片
-
-粒子点能解释 MPM，但不像真实捏捏玩具。最终成片必须是连续表面。
-
-### 7.3 不建议一次性渲完整 390 帧
-
-先做关键帧预览。关键帧不好看，完整视频只会更浪费时间。
-
-## 8. 最小可行闭环
-
-第一轮只做 5 帧：
-
-```text
-导出 5 帧 MPM 粒子
--> 重建 5 帧 mesh
--> Blender 渲染 5 张关键帧
--> 人工确认风格
-```
-
-通过后再扩展到完整视频。
-
-## 9. 文件结构建议
-
-```text
-Final_Project_GKCIV/
-  blender/
-    blender_config.json
-    create_squishy_scene.py
-    render_blender_video.py
-  taichi_squeeze/
-    tools/
-      export_blender_mesh_sequence.py
-  outputs/
-    mpm3d_cube_40mm_soft_corotated/
-      geometry/
-    blender/
-      mpm_cube_soft_corotated_mesh/
-      preview_keyframes/
-      scene/
-      final/
-```
-
-## 10. 下一步执行顺序
-
-1. 安装或定位 Blender 可执行文件。
-2. 给 MPM 增加 `--export-geometry`。
-3. 导出 `mpm3d_cube_40mm_soft_corotated` 的 5 个关键帧粒子数据。
-4. 实现粒子云到 mesh 的重建脚本。
-5. 写 Blender 场景脚本，做材质、灯光、相机和夹板动画。
-6. 渲染 5 张关键帧。
-7. 确认风格后渲染完整视频。
-
-## 11. 成功标准
-
-最终结果应满足：
-
-- 一眼能看出是柔软捏捏玩具被透明夹板压缩。
-- 视频不是科研散点图，而是完整 3D 产品级渲染。
-- 软体表面连续、圆润、带真实光泽。
-- 夹板运动与 Taichi 的 50% 压缩协议一致。
-- 报告中可以明确说明：视频由 Taichi MPM 数据驱动，Blender 仅用于视觉渲染。
+1. 安装 Blender 4.x，或把 `blender.exe` 绝对路径写入 `taichi_blender_squeeze/configs/blender_config.example.json`。
+2. 运行 5 帧关键帧流水线。
+3. 根据预览图微调 `reconstruct_surface.py` 的 `--threshold-ratio`、`--radius-scale` 和 Blender 材质/相机。
+4. 确认效果后运行完整 mesh sequence 和完整视频渲染。

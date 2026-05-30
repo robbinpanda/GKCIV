@@ -1,0 +1,20 @@
+{
+  "blender_exe": "C:/Program Files/Blender Foundation/Blender 4.3/blender.exe",
+  "render_engine": "CYCLES",
+  "device_type": "CUDA",
+  "resolution": [1920, 1080],
+  "fps": 30,
+  "samples": 96,
+  "preview_samples": 32,
+  "soft_body_material": {
+    "base_color": [0.55, 0.76, 1.0, 1.0],
+    "roughness": 0.42,
+    "alpha": 0.96,
+    "subsurface_weight": 0.25
+  },
+  "plate_material": {
+    "base_color": [0.94, 0.97, 1.0, 0.36],
+    "roughness": 0.18,
+    "alpha": 0.36
+  }
+}
