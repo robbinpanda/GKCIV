@@ -16,6 +16,7 @@ from taichi_squeeze.src.constitutive import (
     neo_hookean_energy_density,
     neo_hookean_pk1_ti,
 )
+from taichi_squeeze.src.config_validation import validate_frame_timestep
 from taichi_squeeze.src.geometry3d import object_size, squeeze_diameter, spherical_point_cloud
 from taichi_squeeze.src.metrics import write_metrics_csv
 from taichi_squeeze.src.render3d import render_frame_auto, write_preview_gif
@@ -381,6 +382,7 @@ class TaichiFEM3DSimulator:
 
 
 def run_simulation(config: dict, config_path: Path, frame_override: int | None, no_render: bool) -> Path:
+    validate_frame_timestep(config, config_path)
     output_dir = Path(config["output_dir"])
     frames_dir = output_dir / "frames"
     output_dir.mkdir(parents=True, exist_ok=True)

@@ -11,6 +11,7 @@ import numpy as np
 import taichi as ti
 
 from taichi_squeeze.src.metrics import write_metrics_csv
+from taichi_squeeze.src.config_validation import validate_frame_timestep
 from taichi_squeeze.src.simulate_mpm3d import (
     MPM3DSimulator,
     arch_from_name,
@@ -76,6 +77,7 @@ def export_geometry(
     config = load_config(config_path)
     if arch_override:
         config["arch"] = arch_override
+    validate_frame_timestep(config, config_path)
 
     scene = str(config["scene"])
     output_dir = output_root / scene

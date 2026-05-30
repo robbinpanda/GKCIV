@@ -36,10 +36,16 @@ FEM_CONFIGS = [
 ]
 
 PBD_CONFIG = {"solver": "pbd3d", "constitutive_model": "none"}
+FPS = 60
+
+
+def frame_dt(substeps: int) -> float:
+    return round(1.0 / FPS / substeps, 10)
 
 
 def make_mpm_config(scene: dict, stiff: dict, model: dict) -> dict:
     name = f"{model['solver']}_{scene['scene_id']}_{stiff['stiffness_id']}_{model['constitutive_model']}"
+    mpm_substeps = 167
     cfg = {
         "solver": model["solver"],
         "constitutive_model": model["constitutive_model"],
@@ -52,9 +58,9 @@ def make_mpm_config(scene: dict, stiff: dict, model: dict) -> dict:
         "n_particles": 4000,
         "n_grid": 32,
         "domain_size_m": 0.1,
-        "dt": 0.0001,
-        "substeps_per_frame": 10,
-        "fps": 60,
+        "dt": frame_dt(mpm_substeps),
+        "substeps_per_frame": mpm_substeps,
+        "fps": FPS,
         "max_frames": 390,
         "initial_gap_ratio": 1.05,
         "min_gap_ratio": 0.50,
@@ -95,9 +101,9 @@ def make_fem_config(scene: dict, stiff: dict, model: dict) -> dict:
         "mesh_resolution": [9, 9, 9] if scene["shape"] == "sphere" else [8, 8, 8],
         "sphere_surface_points": 192,
         "domain_size_m": 0.1,
-        "dt": round(1.0 / 60.0 / fem_substeps, 10),
+        "dt": frame_dt(fem_substeps),
         "substeps_per_frame": fem_substeps,
-        "fps": 60,
+        "fps": FPS,
         "max_frames": 390,
         "initial_gap_ratio": 1.05,
         "min_gap_ratio": 0.50,
@@ -128,6 +134,7 @@ def make_fem_config(scene: dict, stiff: dict, model: dict) -> dict:
 
 def make_pbd_config(scene: dict, stiff: dict) -> dict:
     name = f"pbd3d_{scene['scene_id']}_{stiff['stiffness_id']}"
+    pbd_substeps = 17
     cfg = {
         "solver": "pbd3d",
         "constitutive_model": "none",
@@ -140,9 +147,9 @@ def make_pbd_config(scene: dict, stiff: dict) -> dict:
         "constraint_stiffness": 0.8,
         "pbd_iterations": 5,
         "domain_size_m": 0.1,
-        "dt": 0.001,
-        "substeps_per_frame": 10,
-        "fps": 60,
+        "dt": frame_dt(pbd_substeps),
+        "substeps_per_frame": pbd_substeps,
+        "fps": FPS,
         "max_frames": 390,
         "initial_gap_ratio": 1.05,
         "min_gap_ratio": 0.50,
