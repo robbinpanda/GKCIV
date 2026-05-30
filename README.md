@@ -10,6 +10,26 @@ The current experiment matrix contains 20 runs:
 The timestep cores for MPM, FEM, and PBD are implemented with Taichi kernels. Python is used for
 configuration, mesh/point-cloud setup, metrics export, and rendering orchestration.
 
+## Project Layout
+
+```text
+taichi_squeeze/              # Phase 1: Taichi 3D squeeze simulation, rendering, metrics
+taichi_blender_squeeze/      # Phase 2: MPM geometry export, surface reconstruction, Blender scripts
+outputs/                     # Phase 1 generated results, ignored by git
+docs/phase1/                 # Phase 1 report and improvement plan
+docs/phase2/                 # Blender rendering plan
+docs/reviews/                # Repository review notes
+run_all.py                   # Batch runner for the 20 Phase 1 configurations
+generate_configs.py          # Recreate the 20 experiment configs
+```
+
+Key documents:
+
+- `docs/phase1/EXPERIMENT_REPORT.md`
+- `docs/phase1/IMPROVEMENT_PLAN.md`
+- `docs/phase2/TAICHI_BLENDER_RENDER_PLAN.md`
+- `docs/reviews/REPOSITORY_REVIEW_2026-05-31.md`
+
 ## Environment
 
 ```powershell
@@ -74,3 +94,10 @@ python -m taichi_squeeze.analysis.compare_curves --outputs outputs --out outputs
 
 Each run writes `metrics.csv`, `used_config.json`, optional PNG frames, and `preview.gif` into its
 own directory under `outputs/`.
+
+## Blender Pipeline
+
+The Blender stage is intentionally isolated under `taichi_blender_squeeze/`. It exports MPM
+particles, reconstructs PLY meshes, and uses Blender scripts for scene setup and rendering. Blender
+is not required for Phase 1, but must be installed and available on `PATH` or passed as an explicit
+`blender.exe` path before Phase 2 can be rendered.

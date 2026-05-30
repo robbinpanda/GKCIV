@@ -39,14 +39,14 @@
 - `preview.gif`
 - `used_config.json`
 
-汇总图表位于 `outputs/analysis/`：
+汇总图表位于 `../../outputs/analysis/`：
 
-- ![Force displacement](outputs/analysis/force_displacement.png)
-- ![Height time](outputs/analysis/height_time.png)
-- ![Volume ratio](outputs/analysis/volume_ratio_time.png)
-- ![Recovery error](outputs/analysis/recovery_error_time.png)
-- ![Energy](outputs/analysis/energy_time.png)
-- ![Performance](outputs/analysis/performance_ms_step.png)
+- ![Force displacement](../../outputs/analysis/force_displacement.png)
+- ![Height time](../../outputs/analysis/height_time.png)
+- ![Volume ratio](../../outputs/analysis/volume_ratio_time.png)
+- ![Recovery error](../../outputs/analysis/recovery_error_time.png)
+- ![Energy](../../outputs/analysis/energy_time.png)
+- ![Performance](../../outputs/analysis/performance_ms_step.png)
 
 ## 3. 关键数值结果
 
