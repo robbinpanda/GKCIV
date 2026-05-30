@@ -236,6 +236,8 @@ class TaichiFEM3DSimulator:
         self.kinetic_energy = ti.field(dtype=ti.f32, shape=())
         self.elastic_energy = ti.field(dtype=ti.f32, shape=())
         self.mean_j_sum = ti.field(dtype=ti.f32, shape=())
+        self.min_det_f = ti.field(dtype=ti.f32, shape=())
+        self.inverted_tet_count = ti.field(dtype=ti.i32, shape=())
         self.center_sum = ti.Vector.field(3, dtype=ti.f32, shape=())
         self.velocity_sum = ti.Vector.field(3, dtype=ti.f32, shape=())
 
@@ -258,6 +260,8 @@ class TaichiFEM3DSimulator:
         self.kinetic_energy[None] = 0.0
         self.elastic_energy[None] = 0.0
         self.mean_j_sum[None] = 0.0
+        self.min_det_f[None] = 1.0
+        self.inverted_tet_count[None] = 0
         self.center_sum[None] = ti.Vector([0.0, 0.0, 0.0])
         self.velocity_sum[None] = ti.Vector([0.0, 0.0, 0.0])
 
@@ -271,6 +275,8 @@ class TaichiFEM3DSimulator:
             self.force[i] = ti.Vector([0.0, 0.0, 0.0])
         self.elastic_energy[None] = 0.0
         self.mean_j_sum[None] = 0.0
+        self.min_det_f[None] = 1.0e9
+        self.inverted_tet_count[None] = 0
 
         for e in range(self.n_tets):
             tet = self.tets[e]
@@ -280,6 +286,10 @@ class TaichiFEM3DSimulator:
             x3 = self.x[tet[3]]
             ds = ti.Matrix.cols([x1 - x0, x2 - x0, x3 - x0])
             F = ds @ self.dm_inv[e]
+            det_f = F.determinant()
+            ti.atomic_min(self.min_det_f[None], det_f)
+            if det_f <= 0.0:
+                ti.atomic_add(self.inverted_tet_count[None], 1)
 
             P = ti.Matrix.zero(ti.f32, 3, 3)
             energy_density = 0.0
@@ -496,6 +506,8 @@ def run_simulation(config: dict, config_path: Path, frame_override: int | None, 
                 "kinetic_energy": f"{kinetic:.8f}",
                 "elastic_energy": f"{elastic:.8f}",
                 "wall_ms": f"{wall_ms:.4f}",
+                "min_det_f": f"{float(sim.min_det_f[None]):.8f}",
+                "inverted_tet_count": int(sim.inverted_tet_count[None]),
             }
         )
 

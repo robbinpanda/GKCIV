@@ -263,6 +263,12 @@ def write_stability_table(df: pd.DataFrame, out: Path) -> None:
     for label, group in df.groupby("run_dir"):
         final = group.iloc[-1]
         advanced = compute_advanced_metrics(group)
+        min_det_f = ""
+        max_inverted = ""
+        if "min_det_f" in group:
+            min_det_f = pd.to_numeric(group["min_det_f"], errors="coerce").min()
+        if "inverted_tet_count" in group:
+            max_inverted = pd.to_numeric(group["inverted_tet_count"], errors="coerce").max()
         rows.append(
             {
                 "run": label,
@@ -280,6 +286,8 @@ def write_stability_table(df: pd.DataFrame, out: Path) -> None:
                 "sigma_f": advanced["sigma_f"],
                 "volume_mean": advanced["volume_mean"],
                 "volume_var": advanced["volume_var"],
+                "min_det_f": min_det_f,
+                "max_inverted_tets": max_inverted,
             }
         )
     table = pd.DataFrame(rows)

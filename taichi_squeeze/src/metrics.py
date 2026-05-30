@@ -28,6 +28,8 @@ METRIC_COLUMNS = [
     "kinetic_energy",
     "elastic_energy",
     "wall_ms",
+    "min_det_f",
+    "inverted_tet_count",
 ]
 
 
@@ -61,4 +63,3 @@ def write_metrics_csv(path: Path, rows: Iterable[dict]) -> None:
         writer.writeheader()
         for row in rows:
             writer.writerow({column: row.get(column, "") for column in METRIC_COLUMNS})
-
