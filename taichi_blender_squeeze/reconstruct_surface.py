@@ -98,6 +98,34 @@ def write_ascii_ply(path: Path, vertices: np.ndarray, faces: np.ndarray) -> None
             f.write(f"3 {int(a)} {int(b)} {int(c)}\n")
 
 
+def build_vertex_neighbors(vertex_count: int, faces: np.ndarray) -> list[np.ndarray]:
+    neighbors: list[set[int]] = [set() for _ in range(vertex_count)]
+    for a, b, c in faces:
+        ai, bi, ci = int(a), int(b), int(c)
+        neighbors[ai].update((bi, ci))
+        neighbors[bi].update((ai, ci))
+        neighbors[ci].update((ai, bi))
+    return [np.fromiter(items, dtype=np.int32) if items else np.empty(0, dtype=np.int32) for items in neighbors]
+
+
+def taubin_smooth(vertices: np.ndarray, faces: np.ndarray, iterations: int, lambda_factor: float = 0.45, mu_factor: float = -0.48) -> np.ndarray:
+    if iterations <= 0 or len(vertices) == 0 or len(faces) == 0:
+        return vertices
+
+    smoothed = vertices.astype(np.float64, copy=True)
+    neighbors = build_vertex_neighbors(len(smoothed), faces)
+    for _ in range(iterations):
+        for factor in (lambda_factor, mu_factor):
+            updated = smoothed.copy()
+            for idx, adjacent in enumerate(neighbors):
+                if len(adjacent) == 0:
+                    continue
+                centroid = smoothed[adjacent].mean(axis=0)
+                updated[idx] = smoothed[idx] + factor * (centroid - smoothed[idx])
+            smoothed = updated
+    return smoothed.astype(vertices.dtype, copy=False)
+
+
 def taichi_to_blender(points: np.ndarray) -> np.ndarray:
     return points[:, [0, 2, 1]]
 
@@ -111,6 +139,7 @@ def reconstruct_frame(
     resolution: int,
     radius_scale: float,
     threshold_ratio: float,
+    smooth_iterations: int,
 ) -> Path:
     try:
         from skimage.measure import marching_cubes
@@ -124,6 +153,7 @@ def reconstruct_frame(
     cell = (bounds_max - bounds_min) / (resolution - 1)
     verts_world = bounds_min + verts * cell
     verts_world = taichi_to_blender(verts_world)
+    verts_world = taubin_smooth(verts_world, faces, smooth_iterations)
     mesh_path = output_dir / f"mesh_{frame:04d}.ply"
     write_ascii_ply(mesh_path, verts_world.astype(np.float32), faces.astype(np.int32))
     return mesh_path
@@ -135,6 +165,7 @@ def reconstruct_sequence(
     resolution: int,
     radius_scale: float,
     threshold_ratio: float,
+    smooth_iterations: int,
     clean: bool,
 ) -> Path:
     loaded = load_particle_files(input_dir)
@@ -158,6 +189,7 @@ def reconstruct_sequence(
             resolution,
             radius_scale,
             threshold_ratio,
+            smooth_iterations,
         )
         exported_meshes.append(mesh_path.name)
         print(f"[mesh] frame {frame:04d} -> {mesh_path}")
@@ -175,6 +207,7 @@ def reconstruct_sequence(
                 "resolution": resolution,
                 "radius_scale": radius_scale,
                 "threshold_ratio": threshold_ratio,
+                "smooth_iterations": smooth_iterations,
                 "bounds_min": bounds_min.tolist(),
                 "bounds_max": bounds_max.tolist(),
                 "meshes": exported_meshes,
@@ -194,6 +227,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resolution", type=int, default=96)
     parser.add_argument("--radius-scale", type=float, default=2.0)
     parser.add_argument("--threshold-ratio", type=float, default=0.18)
+    parser.add_argument("--smooth-iterations", type=int, default=8)
     parser.add_argument("--no-clean", action="store_true")
     return parser.parse_args()
 
@@ -206,6 +240,7 @@ def main() -> None:
         resolution=args.resolution,
         radius_scale=args.radius_scale,
         threshold_ratio=args.threshold_ratio,
+        smooth_iterations=args.smooth_iterations,
         clean=not args.no_clean,
     )
 
