@@ -5,6 +5,8 @@ import json
 import math
 from pathlib import Path
 
+DEFAULT_CONFIG = Path("taichi_blender_squeeze/configs/blender_config.example.json")
+
 
 def after_double_dash() -> list[str]:
     import sys
@@ -16,22 +18,37 @@ def after_double_dash() -> list[str]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create a Blender scene for the Taichi MPM squeeze mesh sequence.")
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--mesh-dir", type=Path, required=True)
     parser.add_argument("--plates-json", type=Path, required=True)
     parser.add_argument("--output-blend", type=Path, default=Path("taichi_blender_squeeze/outputs/blender/scene/squishy_mpm_cube.blend"))
     parser.add_argument("--render-keyframes", action="store_true")
     parser.add_argument("--preview-dir", type=Path, default=Path("taichi_blender_squeeze/outputs/blender/preview_keyframes"))
     parser.add_argument("--keyframes", type=str, default="0,60,90,150,389")
-    parser.add_argument("--resolution", type=str, default="1920x1080")
-    parser.add_argument("--fps", type=int, default=30)
-    parser.add_argument("--engine", type=str, default="CYCLES", choices=["CYCLES", "BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"])
-    parser.add_argument("--samples", type=int, default=96)
+    parser.add_argument("--resolution", type=str, default=None)
+    parser.add_argument("--fps", type=int, default=None)
+    parser.add_argument("--engine", type=str, default=None, choices=["CYCLES", "BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"])
+    parser.add_argument("--samples", type=int, default=None)
     return parser.parse_args(after_double_dash())
 
 
 def parse_resolution(raw: str) -> tuple[int, int]:
     width, height = raw.lower().split("x", maxsplit=1)
     return int(width), int(height)
+
+
+def load_config(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def configured_resolution(args: argparse.Namespace, config: dict) -> tuple[int, int]:
+    if args.resolution:
+        return parse_resolution(args.resolution)
+    raw = config.get("resolution", [1920, 1080])
+    return int(raw[0]), int(raw[1])
 
 
 def parse_keyframes(raw: str) -> list[int]:
@@ -59,26 +76,30 @@ def set_principled_input(mat, names: tuple[str, ...], value) -> None:
             return
 
 
-def make_soft_material(bpy):
+def make_soft_material(bpy, settings: dict):
     mat = bpy.data.materials.new("soft translucent blue rubber")
     mat.use_nodes = True
-    mat.diffuse_color = (0.55, 0.76, 1.0, 0.96)
-    set_principled_input(mat, ("Base Color",), (0.55, 0.76, 1.0, 1.0))
-    set_principled_input(mat, ("Roughness",), 0.42)
-    set_principled_input(mat, ("Alpha",), 0.96)
-    set_principled_input(mat, ("Subsurface Weight", "Subsurface"), 0.25)
+    base_color = tuple(settings.get("base_color", [0.55, 0.76, 1.0, 1.0]))
+    alpha = float(settings.get("alpha", base_color[3] if len(base_color) > 3 else 0.96))
+    mat.diffuse_color = (*base_color[:3], alpha)
+    set_principled_input(mat, ("Base Color",), (*base_color[:3], 1.0))
+    set_principled_input(mat, ("Roughness",), float(settings.get("roughness", 0.42)))
+    set_principled_input(mat, ("Alpha",), alpha)
+    set_principled_input(mat, ("Subsurface Weight", "Subsurface"), float(settings.get("subsurface_weight", 0.25)))
     set_principled_input(mat, ("Subsurface Radius",), (1.0, 0.75, 0.55))
     mat.use_screen_refraction = True
     return mat
 
 
-def make_plate_material(bpy):
+def make_plate_material(bpy, settings: dict):
     mat = bpy.data.materials.new("frosted acrylic plates")
     mat.use_nodes = True
-    mat.diffuse_color = (0.94, 0.97, 1.0, 0.36)
-    set_principled_input(mat, ("Base Color",), (0.94, 0.97, 1.0, 0.36))
-    set_principled_input(mat, ("Alpha",), 0.36)
-    set_principled_input(mat, ("Roughness",), 0.18)
+    base_color = tuple(settings.get("base_color", [0.94, 0.97, 1.0, 0.36]))
+    alpha = float(settings.get("alpha", base_color[3] if len(base_color) > 3 else 0.36))
+    mat.diffuse_color = (*base_color[:3], alpha)
+    set_principled_input(mat, ("Base Color",), (*base_color[:3], alpha))
+    set_principled_input(mat, ("Alpha",), alpha)
+    set_principled_input(mat, ("Roughness",), float(settings.get("roughness", 0.18)))
     set_principled_input(mat, ("Transmission Weight", "Transmission"), 0.45)
     set_principled_input(mat, ("IOR",), 1.45)
     mat.blend_method = "BLEND"
@@ -219,7 +240,17 @@ def create_studio(bpy, floor_material) -> None:
     camera.data.dof.aperture_fstop = 6.5
 
 
-def configure_render(bpy, width: int, height: int, fps: int, engine: str, samples: int, frame_start: int, frame_end: int) -> None:
+def configure_render(
+    bpy,
+    width: int,
+    height: int,
+    fps: int,
+    engine: str,
+    samples: int,
+    frame_start: int,
+    frame_end: int,
+    device_type: str,
+) -> None:
     scene = bpy.context.scene
     scene.render.engine = engine
     scene.render.resolution_x = width
@@ -234,6 +265,15 @@ def configure_render(bpy, width: int, height: int, fps: int, engine: str, sample
     if engine == "CYCLES":
         scene.cycles.samples = samples
         scene.cycles.use_denoising = True
+        scene.cycles.device = "CPU" if device_type.upper() == "CPU" else "GPU"
+        try:
+            prefs = bpy.context.preferences.addons["cycles"].preferences
+            prefs.compute_device_type = device_type.upper()
+            prefs.get_devices()
+            for device in prefs.devices:
+                device.use = device.type == device_type.upper()
+        except Exception as exc:
+            print(f"Warning: could not configure Cycles device {device_type}: {exc}")
 
 
 def render_keyframes(bpy, frames: list[int], output_dir: Path) -> None:
@@ -247,16 +287,21 @@ def render_keyframes(bpy, frames: list[int], output_dir: Path) -> None:
 
 
 def main() -> None:
+    args = parse_args()
     import bpy
 
-    args = parse_args()
-    width, height = parse_resolution(args.resolution)
+    config = load_config(args.config)
+    width, height = configured_resolution(args, config)
+    fps = int(args.fps or config.get("fps", 60))
+    engine = str(args.engine or config.get("render_engine", "CYCLES"))
+    samples = int(args.samples or config.get("samples", 96))
+    device_type = str(config.get("device_type", "CPU"))
     plates = load_plates(args.plates_json)
     keyframes = parse_keyframes(args.keyframes)
 
     clear_scene(bpy)
-    soft_material = make_soft_material(bpy)
-    plate_material = make_plate_material(bpy)
+    soft_material = make_soft_material(bpy, config.get("soft_body_material", {}))
+    plate_material = make_plate_material(bpy, config.get("plate_material", {}))
     floor_material = make_floor_material(bpy)
 
     mesh_objects = import_mesh_sequence(bpy, args.mesh_dir, soft_material)
@@ -264,7 +309,7 @@ def main() -> None:
     create_studio(bpy, floor_material)
 
     all_frames = sorted({frame for frame, _obj in mesh_objects} | {int(row["frame"]) for row in plates})
-    configure_render(bpy, width, height, args.fps, args.engine, args.samples, min(all_frames), max(all_frames))
+    configure_render(bpy, width, height, fps, engine, samples, min(all_frames), max(all_frames), device_type)
 
     args.output_blend.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(args.output_blend))

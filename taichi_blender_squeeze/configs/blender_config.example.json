@@ -3,7 +3,7 @@
   "render_engine": "CYCLES",
   "device_type": "CUDA",
   "resolution": [1920, 1080],
-  "fps": 30,
+  "fps": 60,
   "samples": 96,
   "preview_samples": 32,
   "soft_body_material": {
